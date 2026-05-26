@@ -63,3 +63,31 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "tenantId",
             "createdBy",
         ]
+
+
+class DraftInvoiceItemInputSerializer(serializers.Serializer):
+    productId = serializers.UUIDField()
+    quantity = serializers.DecimalField(max_digits=18, decimal_places=3)
+    price = serializers.DecimalField(max_digits=18, decimal_places=2, required=False)
+    discount = serializers.DecimalField(max_digits=5, decimal_places=2, default=0)
+
+    def to_internal_value(self, data):
+        value = super().to_internal_value(data)
+        value["product_id"] = value.pop("productId")
+        return value
+
+
+class DraftInvoiceInputSerializer(serializers.Serializer):
+    type = serializers.ChoiceField(choices=Invoice.Type.choices)
+    clientId = serializers.UUIDField()
+    dueDate = serializers.DateField(required=False, allow_null=True)
+    withholdingTaxRate = serializers.DecimalField(max_digits=5, decimal_places=2, default=0)
+    notes = serializers.CharField(required=False, allow_blank=True)
+    items = DraftInvoiceItemInputSerializer(many=True)
+
+    def to_internal_value(self, data):
+        value = super().to_internal_value(data)
+        value["client_id"] = value.pop("clientId")
+        value["due_date"] = value.pop("dueDate", None)
+        value["withholding_tax_rate"] = value.pop("withholdingTaxRate", 0)
+        return value

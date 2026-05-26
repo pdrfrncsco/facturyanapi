@@ -1,18 +1,25 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from apps.common.permissions import TenantRolePermission
 from apps.facturacao.selectors.invoices import invoices_for_empresa
-from apps.facturacao.serializers.invoices import InvoiceSerializer
+from apps.facturacao.serializers.invoices import DraftInvoiceInputSerializer, InvoiceSerializer
+from apps.facturacao.services.invoices import create_draft_invoice, delete_draft_invoice, update_draft_invoice
 
 
-class InvoiceViewSet(viewsets.ReadOnlyModelViewSet):
+class InvoiceViewSet(viewsets.ModelViewSet):
     serializer_class = InvoiceSerializer
     permission_classes = [TenantRolePermission]
     role_permissions = {
         "list": TenantRolePermission.ALL_ROLES,
         "retrieve": TenantRolePermission.ALL_ROLES,
+        "create": TenantRolePermission.WRITE_ROLES,
+        "update": TenantRolePermission.WRITE_ROLES,
+        "partial_update": TenantRolePermission.WRITE_ROLES,
+        "destroy": TenantRolePermission.WRITE_ROLES,
         "issue": TenantRolePermission.FISCAL_MANAGER_ROLES,
         "sync_agt": TenantRolePermission.FISCAL_MANAGER_ROLES,
     }
@@ -23,6 +30,49 @@ class InvoiceViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return invoices_for_empresa(self.request.empresa)
+
+    def _raise_drf_validation(self, exc: DjangoValidationError):
+        if hasattr(exc, "message_dict"):
+            raise ValidationError(exc.message_dict)
+        raise ValidationError(exc.messages)
+
+    def create(self, request, *args, **kwargs):
+        serializer = DraftInvoiceInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            invoice = create_draft_invoice(
+                empresa=request.empresa,
+                user=request.user,
+                data=serializer.validated_data,
+                request=request,
+            )
+        except DjangoValidationError as exc:
+            self._raise_drf_validation(exc)
+        return Response(self.get_serializer(invoice).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        invoice = self.get_object()
+        serializer = DraftInvoiceInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            invoice = update_draft_invoice(
+                invoice=invoice,
+                user=request.user,
+                data=serializer.validated_data,
+                request=request,
+            )
+        except DjangoValidationError as exc:
+            self._raise_drf_validation(exc)
+        return Response(self.get_serializer(invoice).data)
+
+    def partial_update(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    def perform_destroy(self, instance):
+        try:
+            delete_draft_invoice(invoice=instance, user=self.request.user, request=self.request)
+        except DjangoValidationError as exc:
+            self._raise_drf_validation(exc)
 
     @action(detail=True, methods=["post"], url_path="emitir")
     def issue(self, request, pk=None):
