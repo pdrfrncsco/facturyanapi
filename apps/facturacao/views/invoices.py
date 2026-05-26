@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from apps.common.permissions import TenantRolePermission
 from apps.facturacao.selectors.invoices import invoices_for_empresa
 from apps.facturacao.serializers.invoices import DraftInvoiceInputSerializer, InvoiceSerializer
-from apps.facturacao.services.invoices import create_draft_invoice, delete_draft_invoice, update_draft_invoice
+from apps.facturacao.services.invoices import create_draft_invoice, delete_draft_invoice, issue_invoice, update_draft_invoice
 
 
 class InvoiceViewSet(viewsets.ModelViewSet):
@@ -76,10 +76,11 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="emitir")
     def issue(self, request, pk=None):
-        return Response(
-            {"detail": "Emissão fiscal será activada no milestone de facturação."},
-            status=status.HTTP_409_CONFLICT,
-        )
+        try:
+            invoice = issue_invoice(invoice=self.get_object(), user=request.user, request=request)
+        except DjangoValidationError as exc:
+            self._raise_drf_validation(exc)
+        return Response(self.get_serializer(invoice).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="sync-agt")
     def sync_agt(self, request, pk=None):
