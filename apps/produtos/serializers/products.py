@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.produtos.models import Product
+from apps.produtos.validators.products import validate_product_payload
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -24,8 +25,13 @@ class ProductSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        tax_rate = attrs.get("tax_rate", getattr(self.instance, "tax_rate", None))
-        exemption_code = attrs.get("exemption_code", getattr(self.instance, "exemption_code", ""))
-        if tax_rate == 0 and not exemption_code:
-            raise serializers.ValidationError({"exemptionCode": "Obrigatório quando a taxa de IVA é 0."})
+        request = self.context.get("request")
+        empresa = getattr(request, "empresa", None) if request else None
+        if empresa is not None:
+            try:
+                validate_product_payload(empresa=empresa, data=attrs, instance=self.instance)
+            except Exception as exc:
+                if hasattr(exc, "message_dict"):
+                    raise serializers.ValidationError(exc.message_dict)
+                raise
         return attrs

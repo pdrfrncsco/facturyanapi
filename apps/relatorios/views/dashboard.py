@@ -2,12 +2,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.auditoria.serializers.audit_logs import AuditLogSerializer
-from apps.common.permissions import TenantAccessPermission
+from apps.common.permissions import TenantRolePermission
 from apps.relatorios.selectors.dashboard import dashboard_stats_for_empresa
 
 
 class DashboardStatsView(APIView):
-    permission_classes = [TenantAccessPermission]
+    permission_classes = [TenantRolePermission]
+    read_roles = TenantRolePermission.ALL_ROLES
 
     def get(self, request):
         stats = dashboard_stats_for_empresa(request.empresa)

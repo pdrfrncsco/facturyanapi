@@ -1,9 +1,11 @@
 from apps.auditoria.services.audit_logs import create_audit_log
 from apps.empresas.models import Empresa
 from apps.produtos.models import Product
+from apps.produtos.validators.products import validate_product_payload
 
 
 def create_product(*, empresa: Empresa, user, data: dict, request=None) -> Product:
+    validate_product_payload(empresa=empresa, data=data)
     product = Product.objects.create(empresa=empresa, **data)
     create_audit_log(
         empresa=empresa,
@@ -18,6 +20,7 @@ def create_product(*, empresa: Empresa, user, data: dict, request=None) -> Produ
 
 
 def update_product(*, product: Product, user, data: dict, request=None) -> Product:
+    validate_product_payload(empresa=product.empresa, data=data, instance=product)
     for field, value in data.items():
         setattr(product, field, value)
     product.save()

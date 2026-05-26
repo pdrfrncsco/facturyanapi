@@ -2,14 +2,20 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from apps.common.permissions import TenantAccessPermission
+from apps.common.permissions import TenantRolePermission
 from apps.facturacao.selectors.invoices import invoices_for_empresa
 from apps.facturacao.serializers.invoices import InvoiceSerializer
 
 
 class InvoiceViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = InvoiceSerializer
-    permission_classes = [TenantAccessPermission]
+    permission_classes = [TenantRolePermission]
+    role_permissions = {
+        "list": TenantRolePermission.ALL_ROLES,
+        "retrieve": TenantRolePermission.ALL_ROLES,
+        "issue": TenantRolePermission.FISCAL_MANAGER_ROLES,
+        "sync_agt": TenantRolePermission.FISCAL_MANAGER_ROLES,
+    }
     search_fields = ["invoice_no", "client_name", "client_nif"]
     ordering_fields = ["created_at", "issue_date", "grand_total"]
     ordering = ["-created_at"]

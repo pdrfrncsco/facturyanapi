@@ -1,9 +1,11 @@
 from apps.auditoria.services.audit_logs import create_audit_log
 from apps.clientes.models import Client
+from apps.clientes.validators.clients import validate_client_payload
 from apps.empresas.models import Empresa
 
 
 def create_client(*, empresa: Empresa, user, data: dict, request=None) -> Client:
+    validate_client_payload(empresa=empresa, data=data)
     client = Client.objects.create(empresa=empresa, **data)
     create_audit_log(
         empresa=empresa,
@@ -18,6 +20,7 @@ def create_client(*, empresa: Empresa, user, data: dict, request=None) -> Client
 
 
 def update_client(*, client: Client, user, data: dict, request=None) -> Client:
+    validate_client_payload(empresa=client.empresa, data=data, instance=client)
     for field, value in data.items():
         setattr(client, field, value)
     client.save()

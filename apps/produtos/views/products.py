@@ -1,7 +1,7 @@
 from rest_framework import status, viewsets
 from rest_framework.response import Response
 
-from apps.common.permissions import TenantAccessPermission
+from apps.common.permissions import TenantRolePermission
 from apps.produtos.selectors.products import products_for_empresa
 from apps.produtos.serializers.products import ProductSerializer
 from apps.produtos.services.products import create_product, delete_product, update_product
@@ -9,7 +9,15 @@ from apps.produtos.services.products import create_product, delete_product, upda
 
 class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
-    permission_classes = [TenantAccessPermission]
+    permission_classes = [TenantRolePermission]
+    role_permissions = {
+        "list": TenantRolePermission.ALL_ROLES,
+        "retrieve": TenantRolePermission.ALL_ROLES,
+        "create": TenantRolePermission.WRITE_ROLES,
+        "update": TenantRolePermission.WRITE_ROLES,
+        "partial_update": TenantRolePermission.WRITE_ROLES,
+        "destroy": TenantRolePermission.FISCAL_MANAGER_ROLES,
+    }
     search_fields = ["code", "name", "category"]
     ordering_fields = ["code", "name", "price", "created_at"]
     ordering = ["code"]

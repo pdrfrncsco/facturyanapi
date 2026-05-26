@@ -4,12 +4,20 @@ from rest_framework.response import Response
 from apps.clientes.selectors.clients import clients_for_empresa
 from apps.clientes.serializers.clients import ClientSerializer
 from apps.clientes.services.clients import create_client, delete_client, update_client
-from apps.common.permissions import TenantAccessPermission
+from apps.common.permissions import TenantRolePermission
 
 
 class ClientViewSet(viewsets.ModelViewSet):
     serializer_class = ClientSerializer
-    permission_classes = [TenantAccessPermission]
+    permission_classes = [TenantRolePermission]
+    role_permissions = {
+        "list": TenantRolePermission.ALL_ROLES,
+        "retrieve": TenantRolePermission.ALL_ROLES,
+        "create": TenantRolePermission.WRITE_ROLES,
+        "update": TenantRolePermission.WRITE_ROLES,
+        "partial_update": TenantRolePermission.WRITE_ROLES,
+        "destroy": TenantRolePermission.FISCAL_MANAGER_ROLES,
+    }
     search_fields = ["name", "nif", "email"]
     ordering_fields = ["name", "created_at"]
     ordering = ["name"]
