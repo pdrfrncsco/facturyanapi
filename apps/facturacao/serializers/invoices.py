@@ -28,9 +28,13 @@ class InvoiceSerializer(serializers.ModelSerializer):
     withholdingTaxAmount = serializers.DecimalField(source="withholding_tax_amount", max_digits=18, decimal_places=2, read_only=True)
     grandTotal = serializers.DecimalField(source="grand_total", max_digits=18, decimal_places=2, read_only=True)
     invoiceHash = serializers.CharField(source="invoice_hash", read_only=True)
+    previousHash = serializers.CharField(source="previous_hash", read_only=True)
     agtSyncDate = serializers.DateTimeField(source="agt_sync_date", read_only=True)
     agtResponseCode = serializers.CharField(source="agt_response_code", read_only=True)
     qrcodeString = serializers.CharField(source="qrcode_string", read_only=True)
+    cancelledAt = serializers.DateTimeField(source="cancelled_at", read_only=True)
+    cancellationReason = serializers.CharField(source="cancellation_reason", read_only=True)
+    cancelledBy = serializers.CharField(source="cancelled_by.get_full_name", read_only=True)
     tenantId = serializers.UUIDField(source="empresa_id", read_only=True)
     createdBy = serializers.CharField(source="created_by.get_full_name", read_only=True)
     items = InvoiceItemSerializer(many=True, read_only=True)
@@ -56,9 +60,13 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "withholdingTaxAmount",
             "grandTotal",
             "invoiceHash",
+            "previousHash",
             "agtSyncDate",
             "agtResponseCode",
             "qrcodeString",
+            "cancelledAt",
+            "cancellationReason",
+            "cancelledBy",
             "notes",
             "tenantId",
             "createdBy",
@@ -75,6 +83,10 @@ class DraftInvoiceItemInputSerializer(serializers.Serializer):
         value = super().to_internal_value(data)
         value["product_id"] = value.pop("productId")
         return value
+
+
+class CancelInvoiceInputSerializer(serializers.Serializer):
+    reason = serializers.CharField(min_length=3, max_length=500, trim_whitespace=True)
 
 
 class DraftInvoiceInputSerializer(serializers.Serializer):

@@ -1,5 +1,4 @@
-import hashlib
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -7,7 +6,11 @@ from django.utils import timezone
 
 from apps.auditoria.services.audit_logs import create_audit_log
 from apps.empresas.models import Empresa
-from apps.facturacao.models import FiscalSeries, Invoice, InvoiceItem
+from apps.facturacao.models import Invoice, InvoiceItem
+from apps.facturacao.services.agt_sync import queue_agt_cancellation, queue_agt_sync
+from apps.facturacao.validators.fiscal import validate_can_cancel_invoice
+from apps.facturacao.services.decimal_utils import money, quantity
+from apps.facturacao.services.fiscal_issuance import apply_fiscal_issuance
 from apps.facturacao.validators.invoices import (
     decimal_value,
     validate_invoice_header,
@@ -16,50 +19,8 @@ from apps.facturacao.validators.invoices import (
 )
 
 
-MONEY_PLACES = Decimal("0.01")
-QTY_PLACES = Decimal("0.001")
-
-
-def money(value: Decimal) -> Decimal:
-    return value.quantize(MONEY_PLACES, rounding=ROUND_HALF_UP)
-
-
-def quantity(value: Decimal) -> Decimal:
-    return value.quantize(QTY_PLACES, rounding=ROUND_HALF_UP)
-
-
 def _draft_number(invoice_type: str) -> str:
     return f"DRAFT-{invoice_type}-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
-
-
-def _fiscal_number(*, invoice_type: str, fiscal_year: int, sequence: int) -> str:
-    return f"{invoice_type} {fiscal_year}/{sequence:06d}"
-
-
-def _previous_fiscal_hash(*, empresa: Empresa, invoice: Invoice) -> str:
-    previous_invoice = (
-        Invoice.objects.filter(empresa=empresa)
-        .exclude(pk=invoice.pk)
-        .exclude(invoice_hash="")
-        .order_by("-issue_date", "-created_at")
-        .first()
-    )
-    return previous_invoice.invoice_hash if previous_invoice else ""
-
-
-def _fiscal_hash(*, previous_hash: str, invoice_number: str, invoice_date, total: Decimal, company_nif: str) -> str:
-    source = f"{previous_hash}{invoice_number}{invoice_date.isoformat()}{money(total)}{company_nif}"
-    return hashlib.sha1(source.encode("utf-8")).hexdigest()
-
-
-def _qr_code_string(*, invoice: Invoice) -> str:
-    return (
-        "https://portaldocontribuinte.minfin.gov.ao/verify"
-        f"?doc={invoice.invoice_no}"
-        f"&nif={invoice.empresa.nif}"
-        f"&total={money(invoice.grand_total)}"
-        f"&hash={invoice.invoice_hash}"
-    )
 
 
 def _calculate_line(*, price: Decimal, qty: Decimal, discount: Decimal, tax_rate: Decimal) -> dict:
@@ -228,46 +189,8 @@ def delete_draft_invoice(*, invoice: Invoice, user, request=None) -> None:
 @transaction.atomic
 def issue_invoice(*, invoice: Invoice, user, request=None) -> Invoice:
     invoice = Invoice.objects.select_for_update().select_related("empresa").get(pk=invoice.pk)
-    validate_invoice_is_draft(invoice)
-
-    if not invoice.items.exists():
-        raise ValidationError({"items": "Nao e possivel emitir uma factura sem linhas."})
-    if invoice.grand_total <= 0:
-        raise ValidationError({"grandTotal": "O total da factura deve ser superior a zero."})
-
-    issue_date = timezone.localdate()
-    fiscal_year = issue_date.year
-    series, _ = FiscalSeries.objects.select_for_update().get_or_create(
-        empresa=invoice.empresa,
-        document_type=invoice.type,
-        fiscal_year=fiscal_year,
-        code=str(fiscal_year),
-        defaults={"current_number": 0, "is_active": True},
-    )
-    if not series.is_active:
-        raise ValidationError({"series": "A serie fiscal seleccionada nao esta activa."})
-
-    series.current_number += 1
-    series.save(update_fields=["current_number", "updated_at"])
-
-    invoice_number = _fiscal_number(
-        invoice_type=invoice.type,
-        fiscal_year=fiscal_year,
-        sequence=series.current_number,
-    )
-    previous_hash = _previous_fiscal_hash(empresa=invoice.empresa, invoice=invoice)
-    invoice.invoice_no = invoice_number
-    invoice.issue_date = issue_date
-    invoice.previous_hash = previous_hash
-    invoice.invoice_hash = _fiscal_hash(
-        previous_hash=previous_hash,
-        invoice_number=invoice_number,
-        invoice_date=issue_date,
-        total=invoice.grand_total,
-        company_nif=invoice.empresa.nif,
-    )
-    invoice.qrcode_string = _qr_code_string(invoice=invoice)
-    invoice.status = Invoice.Status.ISSUED
+    invoice = apply_fiscal_issuance(invoice=invoice)
+    invoice.agt_response_code = "PENDING"
     invoice.save(
         update_fields=[
             "invoice_no",
@@ -276,15 +199,51 @@ def issue_invoice(*, invoice: Invoice, user, request=None) -> Invoice:
             "invoice_hash",
             "qrcode_string",
             "status",
+            "agt_response_code",
             "updated_at",
         ]
     )
+    queue_agt_sync(invoice=invoice)
 
     create_audit_log(
         empresa=invoice.empresa,
         user=user,
         action="ISSUE_INVOICE",
         details=f"Factura {invoice.invoice_no} emitida com hash fiscal {invoice.invoice_hash}.",
+        request=request,
+        entity_type="invoice",
+        entity_id=str(invoice.id),
+    )
+    return invoice
+
+
+@transaction.atomic
+def cancel_invoice(*, invoice: Invoice, user, reason: str, request=None) -> Invoice:
+    invoice = Invoice.objects.select_for_update().select_related("empresa").get(pk=invoice.pk)
+    validate_can_cancel_invoice(invoice, reason=reason)
+
+    invoice.status = Invoice.Status.CANCELLED
+    invoice.cancelled_at = timezone.now()
+    invoice.cancellation_reason = reason.strip()
+    invoice.cancelled_by = user
+    invoice.agt_response_code = "CANCEL_PENDING"
+    invoice.save(
+        update_fields=[
+            "status",
+            "cancelled_at",
+            "cancellation_reason",
+            "cancelled_by",
+            "agt_response_code",
+            "updated_at",
+        ]
+    )
+    queue_agt_cancellation(invoice=invoice)
+
+    create_audit_log(
+        empresa=invoice.empresa,
+        user=user,
+        action="CANCEL_INVOICE",
+        details=f"Factura {invoice.invoice_no} cancelada. Motivo: {invoice.cancellation_reason}",
         request=request,
         entity_type="invoice",
         entity_id=str(invoice.id),

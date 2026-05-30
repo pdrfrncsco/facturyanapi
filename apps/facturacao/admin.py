@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.facturacao.models import FiscalSeries, Invoice, InvoiceItem
+from apps.facturacao.models import AgtSyncLog, FiscalSeries, Invoice, InvoiceItem
 
 
 class InvoiceItemInline(admin.TabularInline):
@@ -56,6 +56,9 @@ class InvoiceAdmin(admin.ModelAdmin):
         "qrcode_string",
         "agt_sync_date",
         "agt_response_code",
+        "cancelled_at",
+        "cancellation_reason",
+        "cancelled_by",
     )
     inlines = (InvoiceItemInline,)
 
@@ -87,3 +90,12 @@ class InvoiceItemAdmin(admin.ModelAdmin):
         if obj and obj.invoice.status != Invoice.Status.DRAFT:
             return False
         return super().has_delete_permission(request, obj)
+
+
+@admin.register(AgtSyncLog)
+class AgtSyncLogAdmin(admin.ModelAdmin):
+    list_display = ("invoice", "status", "response_code", "attempt_count", "empresa", "created_at")
+    list_filter = ("empresa", "status", "response_code")
+    search_fields = ("invoice__invoice_no", "response_code", "error_message", "empresa__nif")
+    autocomplete_fields = ("empresa", "invoice")
+    readonly_fields = ("id", "created_at", "updated_at", "request_payload", "response_payload")

@@ -1,7 +1,28 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.common.models import TenantOwnedModel
+
+
+FISCAL_IMMUTABLE_FIELDS = (
+    "invoice_no",
+    "type",
+    "issue_date",
+    "client_id",
+    "client_name",
+    "client_nif",
+    "client_address",
+    "subtotal",
+    "discount_total",
+    "tax_total",
+    "withholding_tax_rate",
+    "withholding_tax_amount",
+    "grand_total",
+    "invoice_hash",
+    "previous_hash",
+    "qrcode_string",
+)
 
 
 class FiscalSeries(TenantOwnedModel):
@@ -55,6 +76,15 @@ class Invoice(TenantOwnedModel):
     qrcode_string = models.TextField(blank=True)
     agt_sync_date = models.DateTimeField(null=True, blank=True)
     agt_response_code = models.CharField(max_length=128, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancellation_reason = models.TextField(blank=True)
+    cancelled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="cancelled_invoices",
+    )
     notes = models.TextField(blank=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_invoices")
 
@@ -69,8 +99,22 @@ class Invoice(TenantOwnedModel):
 
     def delete(self, using=None, keep_parents=False):
         if self.status != self.Status.DRAFT:
-            raise ValueError("Issued fiscal documents cannot be deleted.")
+            raise ValidationError("Documentos fiscais emitidos nao podem ser removidos.")
         super().delete(using=using, keep_parents=keep_parents)
+
+    def save(self, *args, **kwargs):
+        if self.pk and self.status != self.Status.DRAFT:
+            previous = Invoice.objects.filter(pk=self.pk).first()
+            if previous and previous.status != self.Status.DRAFT:
+                if self.status == self.Status.CANCELLED and previous.status != self.Status.CANCELLED:
+                    pass
+                else:
+                    for field in FISCAL_IMMUTABLE_FIELDS:
+                        if getattr(self, field) != getattr(previous, field):
+                            raise ValidationError(
+                                "Documentos fiscais emitidos sao imutaveis. Alteracoes nao permitidas."
+                            )
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return self.invoice_no or f"{self.type} draft"

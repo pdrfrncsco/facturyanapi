@@ -6,8 +6,14 @@ from rest_framework.response import Response
 
 from apps.common.permissions import TenantRolePermission
 from apps.facturacao.selectors.invoices import invoices_for_empresa
-from apps.facturacao.serializers.invoices import DraftInvoiceInputSerializer, InvoiceSerializer
-from apps.facturacao.services.invoices import create_draft_invoice, delete_draft_invoice, issue_invoice, update_draft_invoice
+from apps.facturacao.serializers.invoices import CancelInvoiceInputSerializer, DraftInvoiceInputSerializer, InvoiceSerializer
+from apps.facturacao.services.invoices import (
+    cancel_invoice,
+    create_draft_invoice,
+    delete_draft_invoice,
+    issue_invoice,
+    update_draft_invoice,
+)
 
 
 class InvoiceViewSet(viewsets.ModelViewSet):
@@ -21,6 +27,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         "partial_update": TenantRolePermission.WRITE_ROLES,
         "destroy": TenantRolePermission.WRITE_ROLES,
         "issue": TenantRolePermission.FISCAL_MANAGER_ROLES,
+        "cancel": TenantRolePermission.FISCAL_MANAGER_ROLES,
         "sync_agt": TenantRolePermission.FISCAL_MANAGER_ROLES,
     }
     search_fields = ["invoice_no", "client_name", "client_nif"]
@@ -78,6 +85,21 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     def issue(self, request, pk=None):
         try:
             invoice = issue_invoice(invoice=self.get_object(), user=request.user, request=request)
+        except DjangoValidationError as exc:
+            self._raise_drf_validation(exc)
+        return Response(self.get_serializer(invoice).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="cancelar")
+    def cancel(self, request, pk=None):
+        serializer = CancelInvoiceInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            invoice = cancel_invoice(
+                invoice=self.get_object(),
+                user=request.user,
+                reason=serializer.validated_data["reason"],
+                request=request,
+            )
         except DjangoValidationError as exc:
             self._raise_drf_validation(exc)
         return Response(self.get_serializer(invoice).data, status=status.HTTP_200_OK)
