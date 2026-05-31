@@ -7,6 +7,7 @@ from apps.auditoria.views.audit_logs import AuditLogViewSet
 from apps.clientes.views.clients import ClientViewSet
 from apps.empresas.views.empresas import EmpresaViewSet
 from apps.facturacao.views.invoices import InvoiceViewSet
+from apps.pagamentos.views.recibos import ReciboViewSet
 from apps.produtos.views.products import ProductViewSet
 from apps.relatorios.views.dashboard import DashboardStatsView
 from apps.saft.views.export import SaftExportView
@@ -18,6 +19,7 @@ router.register("empresas", EmpresaViewSet, basename="empresas")
 router.register("clientes", ClientViewSet, basename="clientes")
 router.register("produtos", ProductViewSet, basename="produtos")
 router.register("facturas", InvoiceViewSet, basename="facturas")
+router.register("recibos", ReciboViewSet, basename="recibos")
 router.register("auditoria", AuditLogViewSet, basename="auditoria")
 
 urlpatterns = [

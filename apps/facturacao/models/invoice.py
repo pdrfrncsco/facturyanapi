@@ -71,6 +71,7 @@ class Invoice(TenantOwnedModel):
     withholding_tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     withholding_tax_amount = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     grand_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    paid_amount = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     invoice_hash = models.CharField(max_length=128, blank=True)
     previous_hash = models.CharField(max_length=128, blank=True)
     qrcode_string = models.TextField(blank=True)
