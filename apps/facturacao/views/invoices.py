@@ -1,12 +1,16 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.http import FileResponse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from apps.common.permissions import TenantRolePermission
+from apps.facturacao.models import Invoice, InvoiceDocument
 from apps.facturacao.selectors.invoices import invoices_for_empresa
+from apps.facturacao.serializers.documents import AgtSyncLogSerializer, InvoiceDocumentSerializer
 from apps.facturacao.serializers.invoices import CancelInvoiceInputSerializer, DraftInvoiceInputSerializer, InvoiceSerializer
+from apps.facturacao.services.agt_sync import enqueue_invoice_pdf, trigger_agt_sync
 from apps.facturacao.services.invoices import (
     cancel_invoice,
     create_draft_invoice,
@@ -29,6 +33,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         "issue": TenantRolePermission.FISCAL_MANAGER_ROLES,
         "cancel": TenantRolePermission.FISCAL_MANAGER_ROLES,
         "sync_agt": TenantRolePermission.FISCAL_MANAGER_ROLES,
+        "pdf": TenantRolePermission.ALL_ROLES,
     }
     search_fields = ["invoice_no", "client_name", "client_nif"]
     ordering_fields = ["created_at", "issue_date", "grand_total"]
@@ -106,7 +111,38 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="sync-agt")
     def sync_agt(self, request, pk=None):
+        invoice = self.get_object()
+        if invoice.status == Invoice.Status.DRAFT:
+            raise ValidationError({"status": "Emita a factura antes de sincronizar com a AGT."})
+        sync_log = trigger_agt_sync(invoice=invoice)
         return Response(
-            {"detail": "Sincronização AGT será activada com a fila assíncrona."},
-            status=status.HTTP_409_CONFLICT,
+            AgtSyncLogSerializer(sync_log).data,
+            status=status.HTTP_202_ACCEPTED,
         )
+
+    @action(detail=True, methods=["get"], url_path="pdf")
+    def pdf(self, request, pk=None):
+        invoice = self.get_object()
+        document = invoice.documents.order_by("-created_at").first()
+        if document is None or document.status == InvoiceDocument.Status.PENDING:
+            enqueue_invoice_pdf(invoice=invoice)
+            return Response(
+                {"status": "pending", "detail": "PDF em geração. Tente novamente dentro de instantes."},
+                status=status.HTTP_202_ACCEPTED,
+            )
+        if document.status == InvoiceDocument.Status.ERROR:
+            return Response(
+                {"status": "error", "detail": document.error_message or "Falha na geração do PDF."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        if not document.file:
+            return Response({"status": "missing", "detail": "PDF indisponível."}, status=status.HTTP_404_NOT_FOUND)
+        return FileResponse(document.file.open("rb"), as_attachment=True, filename=document.file.name)
+
+    @action(detail=True, methods=["get"], url_path="documento")
+    def document_status(self, request, pk=None):
+        invoice = self.get_object()
+        document = invoice.documents.order_by("-created_at").first()
+        if document is None:
+            return Response({"status": "missing"}, status=status.HTTP_404_NOT_FOUND)
+        return Response(InvoiceDocumentSerializer(document, context={"request": request}).data)

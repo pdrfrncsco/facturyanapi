@@ -10,6 +10,7 @@ from apps.facturacao.views.invoices import InvoiceViewSet
 from apps.produtos.views.products import ProductViewSet
 from apps.relatorios.views.dashboard import DashboardStatsView
 from apps.saft.views.export import SaftExportView
+from apps.saft.views.jobs import SaftExportJobView
 
 
 router = DefaultRouter()
@@ -26,5 +27,6 @@ urlpatterns = [
     path("api/v1/auth/", include("apps.accounts.urls")),
     path("api/v1/dashboard/stats/", DashboardStatsView.as_view(), name="dashboard-stats"),
     path("api/v1/saft/export/", SaftExportView.as_view(), name="saft-export"),
+    path("api/v1/saft/export/<uuid:job_id>/", SaftExportJobView.as_view(), name="saft-export-job"),
     path("api/v1/", include(router.urls)),
 ]

@@ -7,7 +7,7 @@ from django.utils import timezone
 from apps.auditoria.services.audit_logs import create_audit_log
 from apps.empresas.models import Empresa
 from apps.facturacao.models import Invoice, InvoiceItem
-from apps.facturacao.services.agt_sync import queue_agt_cancellation, queue_agt_sync
+from apps.facturacao.services.agt_sync import enqueue_invoice_pdf, queue_agt_cancellation, queue_agt_sync
 from apps.facturacao.validators.fiscal import validate_can_cancel_invoice
 from apps.facturacao.services.decimal_utils import money, quantity
 from apps.facturacao.services.fiscal_issuance import apply_fiscal_issuance
@@ -204,6 +204,9 @@ def issue_invoice(*, invoice: Invoice, user, request=None) -> Invoice:
         ]
     )
     queue_agt_sync(invoice=invoice)
+    enqueue_invoice_pdf(invoice=invoice)
+
+    invoice.refresh_from_db()
 
     create_audit_log(
         empresa=invoice.empresa,
@@ -238,6 +241,8 @@ def cancel_invoice(*, invoice: Invoice, user, reason: str, request=None) -> Invo
         ]
     )
     queue_agt_cancellation(invoice=invoice)
+
+    invoice.refresh_from_db()
 
     create_audit_log(
         empresa=invoice.empresa,

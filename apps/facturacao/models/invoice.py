@@ -134,3 +134,13 @@ class InvoiceItem(TenantOwnedModel):
 
     class Meta:
         indexes = [models.Index(fields=["empresa", "invoice"])]
+
+    def save(self, *args, **kwargs):
+        if self.pk and self.invoice.status != Invoice.Status.DRAFT:
+            raise ValidationError("Itens de documentos fiscais emitidos nao podem ser alterados.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.invoice.status != Invoice.Status.DRAFT:
+            raise ValidationError("Itens de documentos fiscais emitidos nao podem ser removidos.")
+        super().delete(*args, **kwargs)

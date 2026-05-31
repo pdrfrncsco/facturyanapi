@@ -155,3 +155,30 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
 }
+
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = int(os.getenv("CELERY_TASK_TIME_LIMIT", "300"))
+CELERY_TASK_ALWAYS_EAGER = os.getenv("CELERY_TASK_ALWAYS_EAGER", "false").lower() == "true"
+CELERY_TASK_EAGER_PROPAGATES = True
+CELERY_TASK_DEFAULT_QUEUE = "default"
+CELERY_TASK_QUEUES = {
+    "high_priority": {"exchange": "high_priority", "routing_key": "high_priority"},
+    "default": {"exchange": "default", "routing_key": "default"},
+    "low_priority": {"exchange": "low_priority", "routing_key": "low_priority"},
+}
+CELERY_TASK_ROUTES = {
+    "apps.facturacao.tasks.agt_sync.*": {"queue": "high_priority"},
+    "apps.facturacao.tasks.pdf_generation.*": {"queue": "default"},
+    "apps.saft.tasks.export.*": {"queue": "low_priority"},
+}
+
+AGT_MOCK_SYNC = os.getenv("AGT_MOCK_SYNC", "true").lower() == "true"
