@@ -33,7 +33,11 @@ class ReciboViewSet(viewsets.ModelViewSet):
     def emitir(self, request, pk=None):
         receipt = self.get_object()
         try:
-            issued_receipt = finalize_settlement(receipt=receipt)
+            issued_receipt = finalize_settlement(
+                receipt=receipt,
+                user=request.user,
+                request=request
+            )
             return Response(ReciboSerializer(issued_receipt).data)
         except ValueError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)

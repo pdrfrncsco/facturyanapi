@@ -3,6 +3,7 @@ from django.db import transaction
 from apps.facturacao.models import Invoice
 from apps.pagamentos.models import Recibo, ReciboItem
 from apps.pagamentos.services.receipt_issuance import issue_receipt
+from apps.auditoria.services.audit_logs import create_audit_log
 
 
 @transaction.atomic
@@ -34,9 +35,9 @@ def create_settlement_receipt(*, empresa, client, items_data, payment_method, no
 
 
 @transaction.atomic
-def finalize_settlement(*, receipt: Recibo):
+def finalize_settlement(*, receipt: Recibo, user=None, request=None):
     """
-    Issues the receipt and updates the invoices' paid amounts and statuses.
+    Issues the receipt, updates the invoices' paid amounts and statuses, and logs the action.
     """
     issued_receipt = issue_receipt(receipt=receipt)
     
@@ -50,5 +51,15 @@ def finalize_settlement(*, receipt: Recibo):
             invoice.status = Invoice.Status.PARTIAL
             
         invoice.save(update_fields=["status", "paid_amount", "updated_at"])
+
+    create_audit_log(
+        empresa=issued_receipt.empresa,
+        user=user,
+        action="ISSUE_RECEIPT",
+        details=f"Recibo {issued_receipt.receipt_no} emitido para cliente {issued_receipt.client.name}. Total: {issued_receipt.total_amount}",
+        request=request,
+        entity_type="recibo",
+        entity_id=str(issued_receipt.id)
+    )
         
     return issued_receipt

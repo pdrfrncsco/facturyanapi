@@ -71,6 +71,8 @@ def _build_saft_xml(*, empresa: Empresa, year: int, month: int) -> bytes:
 
     # 3. SourceDocuments
     source_docs = ET.SubElement(root, "SourceDocuments")
+    
+    # 3.1 SalesInvoices
     sales_invoices = ET.SubElement(source_docs, "SalesInvoices")
 
     invoices = Invoice.objects.filter(
@@ -115,6 +117,48 @@ def _build_saft_xml(*, empresa: Empresa, year: int, month: int) -> bytes:
     ET.SubElement(sales_invoices, "NumberOfEntries").text = str(invoice_count)
     ET.SubElement(sales_invoices, "TotalDebit").text = str(total_debit)
     ET.SubElement(sales_invoices, "TotalCredit").text = str(total_credit)
+
+    # 3.2 Payments (New)
+    from apps.pagamentos.models import Recibo
+    payments_el = ET.SubElement(source_docs, "Payments")
+    
+    receipts = Recibo.objects.filter(
+        empresa=empresa,
+        issue_date__year=year,
+        issue_date__month=month,
+        status=Recibo.Status.ISSUED
+    )
+    
+    total_payment_debit = Decimal("0")
+    total_payment_credit = Decimal("0")
+    
+    for receipt in receipts:
+        payment = ET.SubElement(payments_el, "Payment")
+        ET.SubElement(payment, "PaymentRefNo").text = receipt.receipt_no
+        ET.SubElement(payment, "TransactionDate").text = receipt.issue_date.isoformat()
+        ET.SubElement(payment, "PaymentType").text = "RC" # Receipt
+        ET.SubElement(payment, "CustomerID").text = str(receipt.client_id)
+        
+        # Payment Lines
+        for idx, item in enumerate(receipt.items.all(), 1):
+            p_line = ET.SubElement(payment, "Line")
+            ET.SubElement(p_line, "LineNumber").text = str(idx)
+            source_doc = ET.SubElement(p_line, "SourceDocumentID")
+            ET.SubElement(source_doc, "OriginatingON").text = item.invoice.invoice_no
+            ET.SubElement(source_doc, "InvoiceDate").text = item.invoice.issue_date.isoformat()
+            ET.SubElement(p_line, "DebitAmount").text = "0.00"
+            ET.SubElement(p_line, "CreditAmount").text = str(item.amount_paid)
+            total_payment_credit += item.amount_paid
+
+        # Document Totals
+        p_totals = ET.SubElement(payment, "DocumentTotals")
+        ET.SubElement(p_totals, "TaxPayable").text = "0.00"
+        ET.SubElement(p_totals, "NetTotal").text = str(receipt.total_amount)
+        ET.SubElement(p_totals, "GrossTotal").text = str(receipt.total_amount)
+
+    ET.SubElement(payments_el, "NumberOfEntries").text = str(receipts.count())
+    ET.SubElement(payments_el, "TotalDebit").text = str(total_payment_debit)
+    ET.SubElement(payments_el, "TotalCredit").text = str(total_payment_credit)
 
     buffer = BytesIO()
     ET.ElementTree(root).write(buffer, encoding="utf-8", xml_declaration=True)

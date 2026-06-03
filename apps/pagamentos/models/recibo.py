@@ -4,6 +4,18 @@ from apps.common.models import TenantOwnedModel
 from apps.facturacao.models import Invoice
 
 
+FISCAL_IMMUTABLE_FIELDS = (
+    "receipt_no",
+    "issue_date",
+    "client_id",
+    "total_amount",
+    "payment_method",
+    "receipt_hash",
+    "previous_hash",
+    "qrcode_string",
+)
+
+
 class Recibo(TenantOwnedModel):
     class Status(models.TextChoices):
         DRAFT = "Draft", "Rascunho"
@@ -41,11 +53,23 @@ class Recibo(TenantOwnedModel):
     def __str__(self):
         return f"{self.receipt_no or 'Rascunho'} - {self.client.name}"
 
+    def delete(self, using=None, keep_parents=False):
+        if self.status != self.Status.DRAFT:
+            raise ValidationError("Recibos emitidos nao podem ser removidos.")
+        super().delete(using=using, keep_parents=keep_parents)
+
     def save(self, *args, **kwargs):
         if self.pk and self.status != self.Status.DRAFT:
-            # Check for immutable fields if already issued
-            # For now, simple block
-            pass
+            previous = Recibo.objects.filter(pk=self.pk).first()
+            if previous and previous.status != self.Status.DRAFT:
+                if self.status == self.Status.CANCELLED and previous.status != self.Status.CANCELLED:
+                    pass
+                else:
+                    for field in FISCAL_IMMUTABLE_FIELDS:
+                        if getattr(self, field) != getattr(previous, field):
+                            raise ValidationError(
+                                "Recibos emitidos sao imutaveis. Alteracoes nao permitidas."
+                            )
         super().save(*args, **kwargs)
 
 
@@ -56,3 +80,13 @@ class ReciboItem(TenantOwnedModel):
 
     def __str__(self):
         return f"{self.invoice.invoice_no} - {self.amount_paid}"
+
+    def save(self, *args, **kwargs):
+        if self.pk and self.recibo.status != Recibo.Status.DRAFT:
+            raise ValidationError("Itens de recibos emitidos nao podem ser alterados.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.recibo.status != Recibo.Status.DRAFT:
+            raise ValidationError("Itens de recibos emitidos nao podem ser removidos.")
+        super().delete(*args, **kwargs)
