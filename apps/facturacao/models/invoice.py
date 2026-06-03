@@ -22,6 +22,8 @@ FISCAL_IMMUTABLE_FIELDS = (
     "invoice_hash",
     "previous_hash",
     "qrcode_string",
+    "origin_document_id",
+    "rectification_reason",
 )
 
 
@@ -87,6 +89,15 @@ class Invoice(TenantOwnedModel):
         related_name="cancelled_invoices",
     )
     notes = models.TextField(blank=True)
+    origin_document = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="credit_notes",
+        help_text="Factura original em caso de Nota de Crédito",
+    )
+    rectification_reason = models.CharField(max_length=255, blank=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="created_invoices")
 
     class Meta:
@@ -95,7 +106,10 @@ class Invoice(TenantOwnedModel):
         indexes = [
             models.Index(fields=["empresa", "status"]),
             models.Index(fields=["empresa", "issue_date"]),
+            models.Index(fields=["empresa", "due_date"]),
             models.Index(fields=["empresa", "invoice_no"]),
+            models.Index(fields=["empresa", "type", "issue_date"], name="idx_empresa_type_date"),
+            models.Index(fields=["client_id", "issue_date"], name="idx_client_date"),
         ]
 
     def delete(self, using=None, keep_parents=False):

@@ -102,6 +102,13 @@ def _build_saft_xml(*, empresa: Empresa, year: int, month: int) -> bytes:
             ET.SubElement(line, "Quantity").text = str(item.quantity)
             ET.SubElement(line, "UnitPrice").text = str(item.price)
             ET.SubElement(line, "Description").text = item.product_name
+            
+            if invoice.type == Invoice.Type.NC and invoice.origin_document:
+                refs = ET.SubElement(line, "References")
+                ref = ET.SubElement(refs, "Reference")
+                ET.SubElement(ref, "Reference").text = invoice.origin_document.invoice_no
+                if invoice.rectification_reason:
+                    ET.SubElement(ref, "Reason").text = invoice.rectification_reason
 
         # Document Totals
         doc_totals = ET.SubElement(inv_el, "DocumentTotals")

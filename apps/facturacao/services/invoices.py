@@ -100,6 +100,8 @@ def create_draft_invoice(*, empresa: Empresa, user, data: dict, request=None) ->
         client_address=f"{client.address}, {client.city}",
         withholding_tax_rate=withholding_tax_rate,
         notes=data.get("notes", ""),
+        origin_document_id=data.get("origin_document_id"),
+        rectification_reason=data.get("rectification_reason", ""),
         created_by=user,
     )
 
@@ -148,6 +150,11 @@ def update_draft_invoice(*, invoice: Invoice, user, data: dict, request=None) ->
     invoice.client_address = f"{client.address}, {client.city}"
     invoice.withholding_tax_rate = withholding_tax_rate
     invoice.notes = data.get("notes", invoice.notes)
+    
+    if "origin_document_id" in data:
+        invoice.origin_document_id = data["origin_document_id"]
+    if "rectification_reason" in data:
+        invoice.rectification_reason = data["rectification_reason"]
 
     totals = _replace_items(invoice=invoice, empresa=invoice.empresa, items=validated_items)
     net_before_tax = totals["subtotal"] - totals["discount_total"]
@@ -205,6 +212,15 @@ def issue_invoice(*, invoice: Invoice, user, request=None) -> Invoice:
     )
     queue_agt_sync(invoice=invoice)
     enqueue_invoice_pdf(invoice=invoice)
+
+    if invoice.type == Invoice.Type.NC and invoice.origin_document:
+        origin = invoice.origin_document
+        origin.paid_amount += invoice.grand_total
+        if origin.paid_amount >= origin.grand_total:
+            origin.status = Invoice.Status.PAID
+        elif origin.paid_amount > 0:
+            origin.status = Invoice.Status.PARTIAL
+        origin.save(update_fields=["status", "paid_amount", "updated_at"])
 
     invoice.refresh_from_db()
 

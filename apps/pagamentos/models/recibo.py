@@ -48,6 +48,8 @@ class Recibo(TenantOwnedModel):
         indexes = [
             models.Index(fields=["empresa", "receipt_no"]),
             models.Index(fields=["empresa", "issue_date"]),
+            models.Index(fields=["empresa", "client_id"]),
+            models.Index(fields=["client_id", "issue_date"], name="idx_recibo_client_date"),
         ]
 
     def __str__(self):

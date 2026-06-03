@@ -28,6 +28,7 @@ urlpatterns = [
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
     path("api/v1/auth/", include("apps.accounts.urls")),
     path("api/v1/dashboard/stats/", DashboardStatsView.as_view(), name="dashboard-stats"),
+    path("api/v1/relatorios/", include("apps.relatorios.urls")),
     path("api/v1/saft/export/", SaftExportView.as_view(), name="saft-export"),
     path("api/v1/saft/export/<uuid:job_id>/", SaftExportJobView.as_view(), name="saft-export-job"),
     path("api/v1/", include(router.urls)),

@@ -35,6 +35,8 @@ class InvoiceSerializer(serializers.ModelSerializer):
     cancelledAt = serializers.DateTimeField(source="cancelled_at", read_only=True)
     cancellationReason = serializers.CharField(source="cancellation_reason", read_only=True)
     cancelledBy = serializers.CharField(source="cancelled_by.get_full_name", read_only=True)
+    originDocumentId = serializers.UUIDField(source="origin_document_id", read_only=True)
+    rectificationReason = serializers.CharField(source="rectification_reason", read_only=True)
     tenantId = serializers.UUIDField(source="empresa_id", read_only=True)
     createdBy = serializers.CharField(source="created_by.get_full_name", read_only=True)
     items = InvoiceItemSerializer(many=True, read_only=True)
@@ -68,6 +70,8 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "cancellationReason",
             "cancelledBy",
             "notes",
+            "originDocumentId",
+            "rectificationReason",
             "tenantId",
             "createdBy",
         ]
@@ -95,6 +99,8 @@ class DraftInvoiceInputSerializer(serializers.Serializer):
     dueDate = serializers.DateField(required=False, allow_null=True)
     withholdingTaxRate = serializers.DecimalField(max_digits=5, decimal_places=2, default=0)
     notes = serializers.CharField(required=False, allow_blank=True)
+    originDocumentId = serializers.UUIDField(required=False, allow_null=True)
+    rectificationReason = serializers.CharField(required=False, allow_blank=True)
     items = DraftInvoiceItemInputSerializer(many=True)
 
     def to_internal_value(self, data):
@@ -102,4 +108,8 @@ class DraftInvoiceInputSerializer(serializers.Serializer):
         value["client_id"] = value.pop("clientId")
         value["due_date"] = value.pop("dueDate", None)
         value["withholding_tax_rate"] = value.pop("withholdingTaxRate", 0)
+        if "originDocumentId" in value:
+            value["origin_document_id"] = value.pop("originDocumentId")
+        if "rectificationReason" in value:
+            value["rectification_reason"] = value.pop("rectificationReason")
         return value
