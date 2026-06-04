@@ -68,6 +68,16 @@ def enqueue_invoice_pdf(*, invoice: Invoice) -> None:
     dispatch_task(generate_invoice_pdf, str(document.id))
 
 
+class AgtTerminalError(RuntimeError):
+    """Erro fatal que não deve ser re-tentado automaticamente."""
+    pass
+
+
+class AgtTransientError(RuntimeError):
+    """Erro temporário que pode ser re-tentado."""
+    pass
+
+
 @transaction.atomic
 def process_agt_sync_log(*, sync_log_id: str) -> AgtSyncLog:
     sync_log = (
@@ -76,6 +86,11 @@ def process_agt_sync_log(*, sync_log_id: str) -> AgtSyncLog:
         .get(pk=sync_log_id)
     )
     invoice = sync_log.invoice
+    
+    # Se já teve sucesso, ignorar (idempotência)
+    if sync_log.status == AgtSyncLog.Status.SUCCESS:
+        return sync_log
+
     sync_log.attempt_count += 1
     client = AgtClient()
     result = client.submit(payload=sync_log.request_payload)
@@ -94,7 +109,7 @@ def process_agt_sync_log(*, sync_log_id: str) -> AgtSyncLog:
         invoice.agt_response_code = result.response_code
         if action == "cancel":
             invoice.save(update_fields=["agt_sync_date", "agt_response_code", "updated_at"])
-        elif invoice.status == Invoice.Status.ISSUED:
+        elif invoice.status == Invoice.Status.ISSUED or invoice.status == Invoice.Status.AGT_ERROR:
             invoice.status = Invoice.Status.AGT_SYNCED
             invoice.save(update_fields=["status", "agt_sync_date", "agt_response_code", "updated_at"])
         else:
@@ -110,6 +125,7 @@ def process_agt_sync_log(*, sync_log_id: str) -> AgtSyncLog:
         )
         return sync_log
 
+    # Falha na submissão
     sync_log.status = AgtSyncLog.Status.ERROR
     sync_log.response_code = result.response_code
     sync_log.response_payload = result.response_payload
@@ -117,6 +133,7 @@ def process_agt_sync_log(*, sync_log_id: str) -> AgtSyncLog:
     sync_log.save(
         update_fields=["status", "response_code", "response_payload", "error_message", "attempt_count", "updated_at"]
     )
+    
     if invoice.status not in {Invoice.Status.CANCELLED, Invoice.Status.DRAFT}:
         invoice.status = Invoice.Status.AGT_ERROR
         invoice.agt_response_code = result.response_code
@@ -130,4 +147,9 @@ def process_agt_sync_log(*, sync_log_id: str) -> AgtSyncLog:
         entity_type="invoice",
         entity_id=str(invoice.id),
     )
-    raise RuntimeError(result.error_message or "Falha na sincronização AGT.")
+    
+    if result.is_transient:
+        raise AgtTransientError(result.error_message or "Falha temporária na sincronização AGT.")
+    
+    raise AgtTerminalError(result.error_message or "Falha terminal na sincronização AGT.")
+
