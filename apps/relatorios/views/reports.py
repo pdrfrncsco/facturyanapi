@@ -2,7 +2,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.permissions import TenantRolePermission
-from apps.relatorios.selectors.reports import generate_iva_map, generate_account_statement
+from apps.relatorios.selectors.reports import (
+    generate_account_statement,
+    generate_aging_report,
+    generate_iva_map,
+)
 
 
 class IvaMapView(APIView):
@@ -27,3 +31,12 @@ class AccountStatementView(APIView):
     def get(self, request, client_id):
         statement = generate_account_statement(request.empresa, client_id)
         return Response(statement)
+
+
+class AgingReportView(APIView):
+    permission_classes = [TenantRolePermission]
+    read_roles = TenantRolePermission.ALL_ROLES
+
+    def get(self, request):
+        report = generate_aging_report(request.empresa)
+        return Response(report)

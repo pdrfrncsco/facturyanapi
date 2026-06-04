@@ -43,6 +43,7 @@ LOCAL_APPS = [
     "apps.pagamentos",
     "apps.relatorios",
     "apps.saft",
+    "apps.notificacoes",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -160,6 +161,9 @@ SPECTACULAR_SETTINGS = {
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@facturyan.co.ao")
+
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_ACCEPT_CONTENT = ["json"]
@@ -180,6 +184,13 @@ CELERY_TASK_ROUTES = {
     "apps.facturacao.tasks.agt_sync.*": {"queue": "high_priority"},
     "apps.facturacao.tasks.pdf_generation.*": {"queue": "default"},
     "apps.saft.tasks.export.*": {"queue": "low_priority"},
+}
+
+CELERY_BEAT_SCHEDULE = {
+    "check-overdue-invoices-daily": {
+        "task": "apps.notificacoes.tasks.check_overdue_invoices",
+        "schedule": timedelta(days=1),
+    },
 }
 
 AGT_MOCK_SYNC = os.getenv("AGT_MOCK_SYNC", "true").lower() == "true"

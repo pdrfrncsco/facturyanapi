@@ -1,7 +1,8 @@
 from django.urls import path
-from apps.relatorios.views.reports import IvaMapView, AccountStatementView
+from apps.relatorios.views.reports import IvaMapView, AccountStatementView, AgingReportView
 
 urlpatterns = [
     path("iva-map/", IvaMapView.as_view(), name="iva-map"),
     path("account-statement/<uuid:client_id>/", AccountStatementView.as_view(), name="account-statement"),
+    path("aging-report/", AgingReportView.as_view(), name="aging-report"),
 ]

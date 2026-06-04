@@ -1,5 +1,6 @@
 from decimal import Decimal
-from django.db.models import Sum
+from django.utils import timezone
+from django.db.models import Sum, F
 
 from apps.empresas.models import Empresa
 from apps.facturacao.models import Invoice, InvoiceItem
@@ -109,3 +110,53 @@ def generate_account_statement(empresa: Empresa, client_id: str) -> dict:
         "currentBalance": running_balance,
         "transactions": transactions
     }
+
+
+def generate_aging_report(empresa: Empresa) -> list:
+    today = timezone.localdate()
+    
+    # Invoices that have balance > 0 and are not drafts/cancelled/NCs (since NCs reduce FT debt)
+    pending_invoices = Invoice.objects.filter(
+        empresa=empresa,
+        status__in=[
+            Invoice.Status.ISSUED,
+            Invoice.Status.PARTIAL,
+            Invoice.Status.AGT_SYNCED,
+            Invoice.Status.AGT_ERROR
+        ]
+    ).filter(grand_total__gt=F('paid_amount')).exclude(type=Invoice.Type.NC)
+
+    clients_debt = {}
+    
+    for inv in pending_invoices:
+        client_id = str(inv.client_id)
+        if client_id not in clients_debt:
+            clients_debt[client_id] = {
+                "clientId": client_id,
+                "clientName": inv.client_name,
+                "clientNif": inv.client_nif,
+                "totalDebt": Decimal('0.00'),
+                "current": Decimal('0.00'),
+                "overdue1_30": Decimal('0.00'),
+                "overdue31_60": Decimal('0.00'),
+                "overdue61_90": Decimal('0.00'),
+                "overdue90plus": Decimal('0.00'),
+            }
+        
+        balance = inv.grand_total - inv.paid_amount
+        clients_debt[client_id]["totalDebt"] += balance
+        
+        if not inv.due_date or inv.due_date >= today:
+            clients_debt[client_id]["current"] += balance
+        else:
+            days_overdue = (today - inv.due_date).days
+            if days_overdue <= 30:
+                clients_debt[client_id]["overdue1_30"] += balance
+            elif days_overdue <= 60:
+                clients_debt[client_id]["overdue31_60"] += balance
+            elif days_overdue <= 90:
+                clients_debt[client_id]["overdue61_90"] += balance
+            else:
+                clients_debt[client_id]["overdue90plus"] += balance
+                
+    return sorted(list(clients_debt.values()), key=lambda x: x["totalDebt"], reverse=True)
