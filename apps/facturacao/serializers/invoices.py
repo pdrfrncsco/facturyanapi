@@ -16,6 +16,8 @@ class InvoiceItemSerializer(serializers.ModelSerializer):
 
 class InvoiceSerializer(serializers.ModelSerializer):
     invoiceNo = serializers.CharField(source="invoice_no", read_only=True)
+    estabelecimentoId = serializers.UUIDField(source="estabelecimento_id", read_only=True)
+    estabelecimentoCode = serializers.CharField(source="estabelecimento.code", read_only=True)
     issueDate = serializers.DateField(source="issue_date", read_only=True)
     dueDate = serializers.DateField(source="due_date", read_only=True)
     clientId = serializers.UUIDField(source="client_id", read_only=True)
@@ -27,6 +29,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
     withholdingTaxRate = serializers.DecimalField(source="withholding_tax_rate", max_digits=5, decimal_places=2, read_only=True)
     withholdingTaxAmount = serializers.DecimalField(source="withholding_tax_amount", max_digits=18, decimal_places=2, read_only=True)
     grandTotal = serializers.DecimalField(source="grand_total", max_digits=18, decimal_places=2, read_only=True)
+    exchangeRate = serializers.DecimalField(source="exchange_rate", max_digits=18, decimal_places=4, read_only=True)
     invoiceHash = serializers.CharField(source="invoice_hash", read_only=True)
     previousHash = serializers.CharField(source="previous_hash", read_only=True)
     agtSyncDate = serializers.DateTimeField(source="agt_sync_date", read_only=True)
@@ -46,8 +49,12 @@ class InvoiceSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "invoiceNo",
+            "estabelecimentoId",
+            "estabelecimentoCode",
             "type",
             "status",
+            "currency",
+            "exchangeRate",
             "issueDate",
             "dueDate",
             "clientId",
@@ -95,7 +102,10 @@ class CancelInvoiceInputSerializer(serializers.Serializer):
 
 class DraftInvoiceInputSerializer(serializers.Serializer):
     type = serializers.ChoiceField(choices=Invoice.Type.choices)
+    estabelecimentoId = serializers.UUIDField(required=False, allow_null=True)
     clientId = serializers.UUIDField()
+    currency = serializers.CharField(max_length=3, default="AOA")
+    exchangeRate = serializers.DecimalField(max_digits=18, decimal_places=4, required=False)
     dueDate = serializers.DateField(required=False, allow_null=True)
     withholdingTaxRate = serializers.DecimalField(max_digits=5, decimal_places=2, default=0)
     notes = serializers.CharField(required=False, allow_blank=True)
@@ -108,6 +118,12 @@ class DraftInvoiceInputSerializer(serializers.Serializer):
         value["client_id"] = value.pop("clientId")
         value["due_date"] = value.pop("dueDate", None)
         value["withholding_tax_rate"] = value.pop("withholdingTaxRate", 0)
+        
+        if "estabelecimentoId" in value:
+            value["estabelecimento_id"] = value.pop("estabelecimentoId")
+        if "exchangeRate" in value:
+            value["exchange_rate"] = value.pop("exchangeRate")
+            
         if "originDocumentId" in value:
             value["origin_document_id"] = value.pop("originDocumentId")
         if "rectificationReason" in value:

@@ -6,6 +6,7 @@ from apps.common.models import TenantOwnedModel
 class AgtSyncLog(TenantOwnedModel):
     class Status(models.TextChoices):
         PENDING = "Pending", "Pendente"
+        WAITING = "Waiting", "Aguardar Validação"
         SUCCESS = "Success", "Sucesso"
         ERROR = "Error", "Erro"
 
@@ -14,6 +15,7 @@ class AgtSyncLog(TenantOwnedModel):
         on_delete=models.PROTECT,
         related_name="agt_sync_logs",
     )
+    request_id = models.CharField(max_length=255, blank=True, help_text="ID retornado pela AGT para consulta de estado")
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     request_payload = models.JSONField(default=dict, blank=True)
     response_payload = models.JSONField(default=dict, blank=True)
@@ -26,6 +28,7 @@ class AgtSyncLog(TenantOwnedModel):
         indexes = [
             models.Index(fields=["empresa", "invoice", "status"]),
             models.Index(fields=["empresa", "status", "created_at"]),
+            models.Index(fields=["request_id"]),
         ]
 
     def __str__(self) -> str:

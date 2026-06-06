@@ -9,6 +9,9 @@ FISCAL_IMMUTABLE_FIELDS = (
     "invoice_no",
     "type",
     "issue_date",
+    "estabelecimento_id",
+    "currency",
+    "exchange_rate",
     "client_id",
     "client_name",
     "client_nif",
@@ -28,6 +31,13 @@ FISCAL_IMMUTABLE_FIELDS = (
 
 
 class FiscalSeries(TenantOwnedModel):
+    estabelecimento = models.ForeignKey(
+        "empresas.Estabelecimento", 
+        on_delete=models.CASCADE, 
+        related_name="series",
+        null=True,
+        blank=True
+    )
     code = models.CharField(max_length=24)
     document_type = models.CharField(max_length=8)
     fiscal_year = models.PositiveIntegerField()
@@ -35,11 +45,12 @@ class FiscalSeries(TenantOwnedModel):
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        unique_together = [("empresa", "code", "document_type", "fiscal_year")]
-        indexes = [models.Index(fields=["empresa", "document_type", "fiscal_year", "is_active"])]
+        unique_together = [("empresa", "estabelecimento", "code", "document_type", "fiscal_year")]
+        indexes = [models.Index(fields=["empresa", "estabelecimento", "document_type", "is_active"])]
 
     def __str__(self) -> str:
-        return f"{self.document_type} {self.fiscal_year}/{self.code}"
+        branch = self.estabelecimento.code if self.estabelecimento else "GLOBAL"
+        return f"{self.document_type} {self.fiscal_year}/{self.code} ({branch})"
 
 
 class Invoice(TenantOwnedModel):
@@ -59,8 +70,20 @@ class Invoice(TenantOwnedModel):
         AGT_ERROR = "AGT_Error", "Erro AGT"
 
     invoice_no = models.CharField(max_length=64, blank=True)
+    estabelecimento = models.ForeignKey(
+        "empresas.Estabelecimento",
+        on_delete=models.PROTECT,
+        related_name="invoices",
+        null=True,
+        blank=True
+    )
     type = models.CharField(max_length=8, choices=Type.choices)
     status = models.CharField(max_length=24, choices=Status.choices, default=Status.DRAFT)
+    
+    # Currency fields
+    currency = models.CharField(max_length=3, default="AOA")
+    exchange_rate = models.DecimalField(max_digits=18, decimal_places=4, default=1)
+    
     issue_date = models.DateField(null=True, blank=True)
     due_date = models.DateField(null=True, blank=True)
     client = models.ForeignKey("clientes.Client", on_delete=models.PROTECT, related_name="invoices")
@@ -127,7 +150,7 @@ class Invoice(TenantOwnedModel):
                     for field in FISCAL_IMMUTABLE_FIELDS:
                         if getattr(self, field) != getattr(previous, field):
                             raise ValidationError(
-                                "Documentos fiscais emitidos sao imutaveis. Alteracoes nao permitidas."
+                                f"Documentos fiscais emitidos sao imutaveis. Alteracoes no campo {field} nao permitidas."
                             )
         super().save(*args, **kwargs)
 

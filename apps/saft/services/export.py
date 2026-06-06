@@ -9,7 +9,7 @@ from django.utils import timezone
 from apps.auditoria.services.audit_logs import create_audit_log
 from apps.clientes.models import Client
 from apps.common.task_dispatch import dispatch_task
-from apps.empresas.models import Empresa
+from apps.empresas.models import Empresa, Estabelecimento
 from apps.facturacao.models import Invoice
 from apps.facturacao.services.decimal_utils import money
 from apps.produtos.models import Product
@@ -62,9 +62,7 @@ def _build_saft_xml(*, empresa: Empresa, year: int, month: int) -> bytes:
     products = Product.objects.filter(empresa=empresa)
     for product in products:
         prod_el = ET.SubElement(master_files, "Product")
-        # Heuristic for product type if field missing
-        is_service = product.unit.upper() in ["HR", "SERV", "UN"] # This is just a guess
-        ET.SubElement(prod_el, "ProductType").text = "P" # Defaulting to Product for now
+        ET.SubElement(prod_el, "ProductType").text = product.type
         ET.SubElement(prod_el, "ProductCode").text = product.code
         ET.SubElement(prod_el, "ProductDescription").text = product.name
         ET.SubElement(prod_el, "ProductNumberCode").text = product.code
@@ -86,6 +84,10 @@ def _build_saft_xml(*, empresa: Empresa, year: int, month: int) -> bytes:
     invoice_count = invoices.count()
 
     for invoice in invoices:
+        # Nota: Valores devem ser convertidos para AOA se em moeda estrangeira
+        # Para simplificar aqui usamos o exchange_rate gravado na factura
+        rate = invoice.exchange_rate
+        
         inv_el = ET.SubElement(sales_invoices, "Invoice")
         ET.SubElement(inv_el, "InvoiceNo").text = invoice.invoice_no
         ET.SubElement(inv_el, "DocumentStatus").text = "N" if invoice.status != Invoice.Status.CANCELLED else "A"
@@ -100,7 +102,7 @@ def _build_saft_xml(*, empresa: Empresa, year: int, month: int) -> bytes:
             ET.SubElement(line, "LineNumber").text = str(idx)
             ET.SubElement(line, "ProductCode").text = item.product.code
             ET.SubElement(line, "Quantity").text = str(item.quantity)
-            ET.SubElement(line, "UnitPrice").text = str(item.price)
+            ET.SubElement(line, "UnitPrice").text = str(money(item.price * rate))
             ET.SubElement(line, "Description").text = item.product_name
             
             if invoice.type == Invoice.Type.NC and invoice.origin_document:
@@ -112,20 +114,26 @@ def _build_saft_xml(*, empresa: Empresa, year: int, month: int) -> bytes:
 
         # Document Totals
         doc_totals = ET.SubElement(inv_el, "DocumentTotals")
-        ET.SubElement(doc_totals, "TaxPayable").text = str(invoice.tax_total)
-        ET.SubElement(doc_totals, "NetTotal").text = str(invoice.subtotal - invoice.discount_total)
-        ET.SubElement(doc_totals, "GrossTotal").text = str(invoice.grand_total)
+        ET.SubElement(doc_totals, "TaxPayable").text = str(money(invoice.tax_total * rate))
+        ET.SubElement(doc_totals, "NetTotal").text = str(money((invoice.subtotal - invoice.discount_total) * rate))
+        ET.SubElement(doc_totals, "GrossTotal").text = str(money(invoice.grand_total * rate))
+        
+        if invoice.currency != "AOA":
+            currency_el = ET.SubElement(doc_totals, "Currency")
+            ET.SubElement(currency_el, "CurrencyCode").text = invoice.currency
+            ET.SubElement(currency_el, "CurrencyAmount").text = str(invoice.grand_total)
+            ET.SubElement(currency_el, "ExchangeRate").text = str(invoice.exchange_rate)
 
         if invoice.type == Invoice.Type.NC:
-            total_debit += invoice.grand_total
+            total_debit += (invoice.grand_total * rate)
         else:
-            total_credit += invoice.grand_total
+            total_credit += (invoice.grand_total * rate)
 
     ET.SubElement(sales_invoices, "NumberOfEntries").text = str(invoice_count)
-    ET.SubElement(sales_invoices, "TotalDebit").text = str(total_debit)
-    ET.SubElement(sales_invoices, "TotalCredit").text = str(total_credit)
+    ET.SubElement(sales_invoices, "TotalDebit").text = str(money(total_debit))
+    ET.SubElement(sales_invoices, "TotalCredit").text = str(money(total_credit))
 
-    # 3.2 Payments (New)
+    # 3.2 Payments
     from apps.pagamentos.models import Recibo
     payments_el = ET.SubElement(source_docs, "Payments")
     
@@ -143,10 +151,9 @@ def _build_saft_xml(*, empresa: Empresa, year: int, month: int) -> bytes:
         payment = ET.SubElement(payments_el, "Payment")
         ET.SubElement(payment, "PaymentRefNo").text = receipt.receipt_no
         ET.SubElement(payment, "TransactionDate").text = receipt.issue_date.isoformat()
-        ET.SubElement(payment, "PaymentType").text = "RC" # Receipt
+        ET.SubElement(payment, "PaymentType").text = "RC"
         ET.SubElement(payment, "CustomerID").text = str(receipt.client_id)
         
-        # Payment Lines
         for idx, item in enumerate(receipt.items.all(), 1):
             p_line = ET.SubElement(payment, "Line")
             ET.SubElement(p_line, "LineNumber").text = str(idx)
@@ -157,7 +164,6 @@ def _build_saft_xml(*, empresa: Empresa, year: int, month: int) -> bytes:
             ET.SubElement(p_line, "CreditAmount").text = str(item.amount_paid)
             total_payment_credit += item.amount_paid
 
-        # Document Totals
         p_totals = ET.SubElement(payment, "DocumentTotals")
         ET.SubElement(p_totals, "TaxPayable").text = "0.00"
         ET.SubElement(p_totals, "NetTotal").text = str(receipt.total_amount)
@@ -201,10 +207,21 @@ def request_saft_export(*, empresa: Empresa, user, year: int, month: int, reques
     }
 
 
+from apps.saft.services.validator import SaftValidator
+
+
 @transaction.atomic
 def process_saft_export_job(*, job_id: str) -> SaftExportJob:
     job = SaftExportJob.objects.select_for_update().select_related("empresa", "requested_by").get(pk=job_id)
     xml_bytes = _build_saft_xml(empresa=job.empresa, year=job.year, month=job.month)
+    
+    # Validação XSD antes de guardar
+    is_valid, errors = SaftValidator.validate_xml(xml_bytes)
+    if not is_valid:
+        error_msg = f"Falha na validação estrutural (XSD): {'; '.join(errors)}"
+        mark_saft_export_error(job_id=job_id, error_message=error_msg)
+        raise RuntimeError(error_msg)
+
     job.file.save(job.filename, ContentFile(xml_bytes), save=False)
     job.status = SaftExportJob.Status.READY
     job.error_message = ""

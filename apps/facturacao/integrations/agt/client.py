@@ -18,6 +18,7 @@ class AgtSubmissionResult:
     response_payload: dict[str, Any]
     error_message: str = ""
     is_transient: bool = False
+    request_id: str = ""
 
 
 class AgtClient:
@@ -104,6 +105,48 @@ class AgtClient:
         
         return payload
 
+    def request_series(self, *, empresa, estabelecimento, document_type, year) -> AgtSubmissionResult:
+        """
+        Solicita uma nova série de faturação à AGT via /solicitarSerie.
+        """
+        request_data = {
+            "establishmentCode": estabelecimento.code,
+            "documentType": document_type,
+            "fiscalYear": year
+        }
+        
+        payload = {
+            "submissionUUID": str(uuid.uuid4()),
+            "taxRegistrationNumber": empresa.nif,
+            "submissionTimeStamp": timezone.now().isoformat(),
+            "schemaVersion": self.api_version,
+            "action": "solicitarSerie",
+            "request": request_data,
+            "jwsSignature": SignatureService.generate_document_signature(
+                empresa=empresa,
+                document_data=request_data
+            ),
+            "softwareInfo": self._get_software_info(empresa),
+        }
+        
+        return self.submit(payload=payload)
+
+    def get_status(self, *, empresa, request_id) -> AgtSubmissionResult:
+        """
+        Consulta o estado de processamento de um pedido via /obterEstado.
+        """
+        payload = {
+            "submissionUUID": str(uuid.uuid4()),
+            "taxRegistrationNumber": empresa.nif,
+            "submissionTimeStamp": timezone.now().isoformat(),
+            "schemaVersion": self.api_version,
+            "action": "obterEstado",
+            "requestID": request_id,
+            "softwareInfo": self._get_software_info(empresa),
+        }
+        
+        return self.submit(payload=payload)
+
     def submit(self, *, payload: dict[str, Any]) -> AgtSubmissionResult:
         """
         Submete o documento para a AGT. 
@@ -163,5 +206,7 @@ class AgtClient:
                 "detail": f"Sincronização AGT simulada com sucesso ({action}).",
                 "action": action,
                 "mock": True,
+                "requestID": str(uuid.uuid4())
             },
+            request_id=str(uuid.uuid4())
         )

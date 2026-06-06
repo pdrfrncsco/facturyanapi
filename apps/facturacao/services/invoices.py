@@ -5,8 +5,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.auditoria.services.audit_logs import create_audit_log
-from apps.empresas.models import Empresa
-from apps.facturacao.models import Invoice, InvoiceItem
+from apps.empresas.models import Empresa, Estabelecimento
+from apps.facturacao.models import Invoice, InvoiceItem, ExchangeRate
 from apps.facturacao.services.agt_sync import enqueue_invoice_pdf, queue_agt_cancellation, queue_agt_sync
 from apps.facturacao.validators.fiscal import validate_can_cancel_invoice
 from apps.facturacao.services.decimal_utils import money, quantity
@@ -21,6 +21,22 @@ from apps.facturacao.validators.invoices import (
 
 def _draft_number(invoice_type: str) -> str:
     return f"DRAFT-{invoice_type}-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+
+
+def _get_exchange_rate(*, empresa: Empresa, currency: str, date) -> Decimal:
+    if currency == "AOA":
+        return Decimal("1.0000")
+    
+    rate_obj = ExchangeRate.objects.filter(
+        empresa=empresa,
+        currency_code=currency,
+        date__lte=date
+    ).order_by("-date").first()
+    
+    if not rate_obj:
+        raise ValidationError({"currency": f"Nenhuma taxa de câmbio encontrada para {currency} até a data {date}."})
+    
+    return rate_obj.rate
 
 
 def _calculate_line(*, price: Decimal, qty: Decimal, discount: Decimal, tax_rate: Decimal) -> dict:
@@ -87,11 +103,26 @@ def create_draft_invoice(*, empresa: Empresa, user, data: dict, request=None) ->
     if withholding_tax_rate < 0 or withholding_tax_rate > 100:
         raise ValidationError({"withholdingTaxRate": "A retencao deve estar entre 0 e 100."})
 
+    estabelecimento_id = data.get("estabelecimento_id")
+    if estabelecimento_id:
+        estabelecimento = Estabelecimento.objects.get(empresa=empresa, pk=estabelecimento_id)
+    else:
+        estabelecimento = Estabelecimento.objects.filter(empresa=empresa, code="SEDE").first() or \
+                         Estabelecimento.objects.filter(empresa=empresa).first()
+
+    currency = data.get("currency", "AOA")
+    exchange_rate = data.get("exchange_rate")
+    if not exchange_rate:
+        exchange_rate = _get_exchange_rate(empresa=empresa, currency=currency, date=timezone.localdate())
+
     invoice = Invoice.objects.create(
         empresa=empresa,
+        estabelecimento=estabelecimento,
         invoice_no=_draft_number(data["type"]),
         type=data["type"],
         status=Invoice.Status.DRAFT,
+        currency=currency,
+        exchange_rate=exchange_rate,
         issue_date=data.get("issue_date") or timezone.localdate(),
         due_date=data.get("due_date"),
         client=client,
@@ -151,6 +182,16 @@ def update_draft_invoice(*, invoice: Invoice, user, data: dict, request=None) ->
     invoice.withholding_tax_rate = withholding_tax_rate
     invoice.notes = data.get("notes", invoice.notes)
     
+    if "estabelecimento_id" in data:
+        invoice.estabelecimento = Estabelecimento.objects.get(empresa=invoice.empresa, pk=data["estabelecimento_id"])
+    
+    if "currency" in data:
+        invoice.currency = data["currency"]
+        if "exchange_rate" in data:
+            invoice.exchange_rate = data["exchange_rate"]
+        else:
+            invoice.exchange_rate = _get_exchange_rate(empresa=invoice.empresa, currency=invoice.currency, date=timezone.localdate())
+
     if "origin_document_id" in data:
         invoice.origin_document_id = data["origin_document_id"]
     if "rectification_reason" in data:
@@ -195,12 +236,13 @@ def delete_draft_invoice(*, invoice: Invoice, user, request=None) -> None:
 
 @transaction.atomic
 def issue_invoice(*, invoice: Invoice, user, request=None) -> Invoice:
-    invoice = Invoice.objects.select_for_update().select_related("empresa").get(pk=invoice.pk)
+    invoice = Invoice.objects.select_for_update().select_related("empresa", "estabelecimento").get(pk=invoice.pk)
     invoice = apply_fiscal_issuance(invoice=invoice)
     invoice.agt_response_code = "PENDING"
     invoice.save(
         update_fields=[
             "invoice_no",
+            "estabelecimento",
             "issue_date",
             "previous_hash",
             "invoice_hash",

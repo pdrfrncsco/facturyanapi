@@ -87,8 +87,8 @@ def process_agt_sync_log(*, sync_log_id: str) -> AgtSyncLog:
     )
     invoice = sync_log.invoice
     
-    # Se já teve sucesso, ignorar (idempotência)
-    if sync_log.status == AgtSyncLog.Status.SUCCESS:
+    # Se já teve sucesso ou está a aguardar (será tratado pelo polling), ignorar
+    if sync_log.status in {AgtSyncLog.Status.SUCCESS, AgtSyncLog.Status.WAITING}:
         return sync_log
 
     sync_log.attempt_count += 1
@@ -96,33 +96,20 @@ def process_agt_sync_log(*, sync_log_id: str) -> AgtSyncLog:
     result = client.submit(payload=sync_log.request_payload)
 
     if result.success:
-        sync_log.status = AgtSyncLog.Status.SUCCESS
+        # AGT devolve um requestID para modelos assíncronos
+        sync_log.request_id = result.request_id
+        sync_log.status = AgtSyncLog.Status.WAITING
         sync_log.response_code = result.response_code
         sync_log.response_payload = result.response_payload
         sync_log.error_message = ""
         sync_log.save(
-            update_fields=["status", "response_code", "response_payload", "error_message", "attempt_count", "updated_at"]
+            update_fields=["request_id", "status", "response_code", "response_payload", "error_message", "attempt_count", "updated_at"]
         )
-
-        action = sync_log.request_payload.get("action", "issue")
-        invoice.agt_sync_date = timezone.now()
-        invoice.agt_response_code = result.response_code
-        if action == "cancel":
-            invoice.save(update_fields=["agt_sync_date", "agt_response_code", "updated_at"])
-        elif invoice.status == Invoice.Status.ISSUED or invoice.status == Invoice.Status.AGT_ERROR:
-            invoice.status = Invoice.Status.AGT_SYNCED
-            invoice.save(update_fields=["status", "agt_sync_date", "agt_response_code", "updated_at"])
-        else:
-            invoice.save(update_fields=["agt_sync_date", "agt_response_code", "updated_at"])
-
-        create_audit_log(
-            empresa=sync_log.empresa,
-            user=None,
-            action="AGT_SYNC_SUCCESS",
-            details=f"Sincronização AGT bem sucedida para {invoice.invoice_no}. Código: {result.response_code}",
-            entity_type="invoice",
-            entity_id=str(invoice.id),
-        )
+        
+        # Enfileirar polling
+        from apps.facturacao.tasks.agt_sync import poll_agt_status
+        dispatch_task(poll_agt_status, str(sync_log.id))
+        
         return sync_log
 
     # Falha na submissão
@@ -153,3 +140,63 @@ def process_agt_sync_log(*, sync_log_id: str) -> AgtSyncLog:
     
     raise AgtTerminalError(result.error_message or "Falha terminal na sincronização AGT.")
 
+
+@transaction.atomic
+def poll_agt_status(*, sync_log_id: str) -> AgtSyncLog:
+    """
+    Consulta o estado de um pedido assíncrono na AGT.
+    """
+    sync_log = (
+        AgtSyncLog.objects.select_for_update()
+        .select_related("invoice", "invoice__empresa", "empresa")
+        .get(pk=sync_log_id)
+    )
+    
+    if sync_log.status != AgtSyncLog.Status.WAITING or not sync_log.request_id:
+        return sync_log
+
+    client = AgtClient()
+    result = client.get_status(empresa=sync_log.empresa, request_id=sync_log.request_id)
+
+    if result.success:
+        # Em mock retorna sucesso logo. Em prod validamos o payload.
+        sync_log.status = AgtSyncLog.Status.SUCCESS
+        sync_log.response_code = result.response_code
+        sync_log.response_payload = result.response_payload
+        sync_log.save(update_fields=["status", "response_code", "response_payload", "updated_at"])
+        
+        invoice = sync_log.invoice
+        action = sync_log.request_payload.get("action", "issue")
+        invoice.agt_sync_date = timezone.now()
+        invoice.agt_response_code = result.response_code
+        
+        if action == "cancel":
+            invoice.save(update_fields=["agt_sync_date", "agt_response_code", "updated_at"])
+        elif invoice.status in {Invoice.Status.ISSUED, Invoice.Status.AGT_ERROR}:
+            invoice.status = Invoice.Status.AGT_SYNCED
+            invoice.save(update_fields=["status", "agt_sync_date", "agt_response_code", "updated_at"])
+        
+        create_audit_log(
+            empresa=sync_log.empresa,
+            user=None,
+            action="AGT_STATUS_CONFIRMED",
+            details=f"Validação AGT confirmada para {invoice.invoice_no}. Código: {result.response_code}",
+            entity_type="invoice",
+            entity_id=str(invoice.id),
+        )
+    else:
+        if result.is_transient:
+            raise AgtTransientError("AGT ainda a processar ou indisponível temporariamente.")
+        
+        # Erro terminal na validação (rejeitada pela AGT)
+        sync_log.status = AgtSyncLog.Status.ERROR
+        sync_log.error_message = result.error_message
+        sync_log.save(update_fields=["status", "error_message", "updated_at"])
+        
+        invoice = sync_log.invoice
+        invoice.status = Invoice.Status.AGT_ERROR
+        invoice.save(update_fields=["status", "updated_at"])
+        
+        raise AgtTerminalError(f"Documento rejeitado pela AGT: {result.error_message}")
+
+    return sync_log
