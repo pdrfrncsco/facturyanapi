@@ -1,8 +1,12 @@
 import logging
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
 from django.conf import settings
+from django.utils import timezone
+
+from apps.common.services.signature import SignatureService
 
 logger = logging.getLogger(__name__)
 
@@ -24,34 +28,81 @@ class AgtClient:
 
     api_version = "v1"
 
-    def build_invoice_payload(self, *, invoice) -> dict[str, Any]:
-        return {
-            "action": "issue",
-            "apiVersion": self.api_version,
-            "documentType": invoice.type,
-            "documentNumber": invoice.invoice_no,
-            "issueDate": invoice.issue_date.isoformat() if invoice.issue_date else None,
-            "companyNif": invoice.empresa.nif,
-            "clientNif": invoice.client_nif,
-            "grandTotal": str(invoice.grand_total),
-            "invoiceHash": invoice.invoice_hash,
-            "qrCode": invoice.qrcode_string,
+    def _get_software_info(self, empresa):
+        info = {
+            "productId": "FACTURYAN ERP",
+            "productVersion": "1.0.0",
+            "softwareValidationNumber": empresa.agt_certificate_no or "0",
         }
+        info["jwsSoftwareSignature"] = SignatureService.generate_software_signature(
+            empresa=empresa, 
+            software_info=info
+        )
+        return info
+
+    def build_invoice_payload(self, *, invoice) -> dict[str, Any]:
+        empresa = invoice.empresa
+        
+        doc_data = {
+            "documentNumber": invoice.invoice_no,
+            "companyNif": empresa.nif,
+            "documentType": invoice.type,
+            "issueDate": invoice.issue_date.isoformat() if invoice.issue_date else None,
+            "grandTotal": str(invoice.grand_total),
+        }
+        
+        payload = {
+            "submissionUUID": str(uuid.uuid4()),
+            "taxRegistrationNumber": empresa.nif,
+            "submissionTimeStamp": timezone.now().isoformat(),
+            "schemaVersion": self.api_version,
+            "action": "issue",
+            "document": doc_data,
+            "jwsDocumentSignature": SignatureService.generate_document_signature(
+                empresa=empresa,
+                document_data=doc_data
+            ),
+            "softwareInfo": self._get_software_info(empresa),
+        }
+        
+        # Final request envelope signature
+        envelope_data = {
+            "nif": empresa.nif,
+            "uuid": payload["submissionUUID"],
+            "timestamp": payload["submissionTimeStamp"]
+        }
+        payload["jwsSignature"] = SignatureService.generate_document_signature(
+            empresa=empresa,
+            document_data=envelope_data
+        )
+        
+        return payload
 
     def build_cancellation_payload(self, *, invoice) -> dict[str, Any]:
-        return {
+        empresa = invoice.empresa
+        
+        doc_data = {
             "action": "cancel",
-            "apiVersion": self.api_version,
             "documentType": invoice.type,
             "documentNumber": invoice.invoice_no,
-            "issueDate": invoice.issue_date.isoformat() if invoice.issue_date else None,
             "cancelledAt": invoice.cancelled_at.isoformat() if invoice.cancelled_at else None,
-            "companyNif": invoice.empresa.nif,
-            "clientNif": invoice.client_nif,
-            "grandTotal": str(invoice.grand_total),
-            "invoiceHash": invoice.invoice_hash,
             "cancellationReason": invoice.cancellation_reason,
         }
+
+        payload = {
+            "submissionUUID": str(uuid.uuid4()),
+            "taxRegistrationNumber": empresa.nif,
+            "submissionTimeStamp": timezone.now().isoformat(),
+            "schemaVersion": self.api_version,
+            "document": doc_data,
+            "jwsDocumentSignature": SignatureService.generate_document_signature(
+                empresa=empresa,
+                document_data=doc_data
+            ),
+            "softwareInfo": self._get_software_info(empresa),
+        }
+        
+        return payload
 
     def submit(self, *, payload: dict[str, Any]) -> AgtSubmissionResult:
         """
@@ -60,13 +111,6 @@ class AgtClient:
         """
         if settings.AGT_MOCK_SYNC:
             return self._mock_submit(payload)
-        
-        # SKELETON: Real SOAP/REST implementation would go here
-        # try:
-        #     response = requests.post(f"{settings.AGT_URL}/submit", json=payload, timeout=10)
-        #     return AgtSubmissionResult(...)
-        # except requests.exceptions.RequestException as e:
-        #     return AgtSubmissionResult(success=False, ..., is_transient=True)
         
         return AgtSubmissionResult(
             success=False,
@@ -89,7 +133,8 @@ class AgtClient:
             time.sleep(random.uniform(0.1, 0.4))
 
         # Logic to simulate specific failure scenarios based on NIF for testing
-        client_nif = payload.get("clientNif", "")
+        doc = payload.get("document", {})
+        client_nif = doc.get("clientNif", "")
         
         # NIF ending in '99' simulates a terminal error (Validation Error)
         if client_nif.endswith("99"):

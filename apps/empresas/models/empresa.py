@@ -13,6 +13,8 @@ class Empresa(UUIDModel, TimeStampedModel, SoftDeleteModel):
     fiscal_regime = models.CharField(max_length=255)
     logo_url = models.URLField(blank=True)
     agt_certificate_no = models.CharField(max_length=64, blank=True)
+    software_private_key = models.TextField(blank=True, help_text="Chave privada do produtor (usada para jwsSoftwareSignature)")
+    agt_private_key = models.TextField(blank=True, help_text="Chave privada do contribuinte fornecida pela AGT")
     is_active = models.BooleanField(default=True)
 
     class Meta:
