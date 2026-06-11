@@ -4,9 +4,11 @@ from apps.facturacao.models import ExchangeRate
 
 
 class ExchangeRateSerializer(serializers.ModelSerializer):
+    currencyCode = serializers.CharField(source="currency_code")
+
     class Meta:
         model = ExchangeRate
-        fields = ["id", "currency_code", "rate", "date"]
+        fields = ["id", "currencyCode", "rate", "date"]
 
 
 class ExchangeRateViewSet(viewsets.ModelViewSet):

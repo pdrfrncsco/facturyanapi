@@ -1,13 +1,14 @@
-from rest_framework import viewsets
+from rest_framework import viewsets, serializers
 from apps.common.permissions import TenantRolePermission
 from apps.empresas.models import Estabelecimento
-from rest_framework import serializers
 
 
 class EstabelecimentoSerializer(serializers.ModelSerializer):
+    isActive = serializers.BooleanField(source="is_active", default=True)
+
     class Meta:
         model = Estabelecimento
-        fields = ["id", "code", "name", "address", "city", "phone", "email", "is_active"]
+        fields = ["id", "code", "name", "address", "city", "phone", "email", "isActive"]
 
 
 class EstabelecimentoViewSet(viewsets.ModelViewSet):

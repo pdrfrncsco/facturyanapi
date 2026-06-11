@@ -6,12 +6,15 @@ from apps.common.models import SoftDeleteModel, TimeStampedModel, UUIDModel
 
 class Empresa(UUIDModel, TimeStampedModel, SoftDeleteModel):
     name = models.CharField(max_length=255)
-    nif = models.CharField(max_length=32, unique=True)
-    address = models.CharField(max_length=255)
-    city = models.CharField(max_length=120, default="Luanda")
-    country = models.CharField(max_length=120, default="Angola")
-    fiscal_regime = models.CharField(max_length=255)
+    nif = models.CharField(max_length=20, unique=True)
+    address = models.CharField(max_length=255, blank=True)
+    city = models.CharField(max_length=120, default="Luanda", blank=True)
+    country = models.CharField(max_length=120, default="Angola", blank=True)
+    fiscal_regime = models.CharField(max_length=255, blank=True)
     logo_url = models.URLField(blank=True)
+    system_name = models.CharField(max_length=100, default="FACTURYAN ERP", blank=True)
+    primary_color = models.CharField(max_length=7, default="#3b82f6", blank=True)
+
     agt_certificate_no = models.CharField(max_length=64, blank=True)
     software_private_key = models.TextField(blank=True, help_text="Chave privada do produtor (usada para jwsSoftwareSignature)")
     agt_private_key = models.TextField(blank=True, help_text="Chave privada do contribuinte fornecida pela AGT")

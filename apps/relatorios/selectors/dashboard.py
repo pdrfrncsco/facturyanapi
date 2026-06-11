@@ -1,13 +1,10 @@
 from decimal import Decimal
 from django.db.models import Sum, Count, Q
 from django.db.models.functions import TruncMonth
-from django.utils import timezone
-from datetime import timedelta
 
 from apps.auditoria.selectors.audit_logs import audit_logs_for_empresa
 from apps.empresas.models import Empresa
 from apps.facturacao.models import Invoice
-from apps.pagamentos.models import Recibo, ReciboItem
 
 
 def dashboard_stats_for_empresa(empresa: Empresa) -> dict:
@@ -33,8 +30,8 @@ def dashboard_stats_for_empresa(empresa: Empresa) -> dict:
     pending = total_invoiced - total_paid
     
     # Monthly Revenue for the current year
-    current_date = timezone.now()
-    current_year = current_date.year
+    from django.utils import timezone
+    current_year = timezone.now().year
     
     monthly_data = (
         invoices.filter(issue_date__year=current_year)
@@ -48,7 +45,7 @@ def dashboard_stats_for_empresa(empresa: Empresa) -> dict:
         .order_by("month")
     )
     
-    months_labels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+    months = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
     monthly_revenue = []
     
     data_dict = {item["month"].month: item for item in monthly_data if item["month"]}
@@ -57,51 +54,18 @@ def dashboard_stats_for_empresa(empresa: Empresa) -> dict:
         item = data_dict.get(i)
         if item:
             monthly_revenue.append({
-                "month": months_labels[i-1],
+                "month": months[i-1],
                 "value": item["value"],
                 "tax": item["tax"],
                 "count": item["count"]
             })
         else:
             monthly_revenue.append({
-                "month": months_labels[i-1],
+                "month": months[i-1],
                 "value": Decimal("0.00"),
                 "tax": Decimal("0.00"),
                 "count": 0
             })
-
-    # Projections vs Realized (Next 6 months and past 6 months)
-    projections_realized = []
-    start_date = (current_date.replace(day=1) - timedelta(days=150)).replace(day=1) # 5 months ago
-    
-    for i in range(0, 12): # Total 12 months: 5 past, current, 6 future
-        month_date = (start_date + timedelta(days=i*31)).replace(day=1)
-        month_name = months_labels[month_date.month - 1]
-        
-        # Realized: Payments received in this month
-        realized = ReciboItem.objects.filter(
-            empresa=empresa,
-            recibo__issue_date__year=month_date.year,
-            recibo__issue_date__month=month_date.month,
-            recibo__status=Recibo.Status.ISSUED
-        ).aggregate(total=Sum('amount_paid'))['total'] or Decimal('0.00')
-        
-        # Projected: Invoices due in this month that are not fully paid
-        # For past months, projected could be what was due.
-        # For future months, it's what's expected.
-        projected = Invoice.objects.filter(
-            empresa=empresa,
-            due_date__year=month_date.year,
-            due_date__month=month_date.month
-        ).exclude(status=Invoice.Status.CANCELLED).exclude(status=Invoice.Status.DRAFT).aggregate(
-            total=Sum('grand_total')
-        )['total'] or Decimal('0.00')
-
-        projections_realized.append({
-            "month": f"{month_name} {str(month_date.year)[2:]}",
-            "projected": projected,
-            "realized": realized
-        })
 
     return {
         "totalInvoiced": total_invoiced,
@@ -114,7 +78,6 @@ def dashboard_stats_for_empresa(empresa: Empresa) -> dict:
         "paidCount": paid,
         "syncSuccessRate": 100,
         "monthlyRevenue": monthly_revenue,
-        "projectionsRealized": projections_realized,
         "categorySales": [],
         "recentActivity": recent_activity,
     }
