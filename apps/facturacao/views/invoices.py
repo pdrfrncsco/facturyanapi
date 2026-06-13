@@ -120,6 +120,30 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             status=status.HTTP_202_ACCEPTED,
         )
 
+    @action(detail=True, methods=["post"], url_path="validar-agt")
+    def validate_agt(self, request, pk=None):
+        from apps.facturacao.models import AgtSyncLog
+        from apps.facturacao.services.agt_sync import poll_agt_status
+        
+        invoice = self.get_object()
+        sync_log = invoice.agt_sync_logs.filter(status=AgtSyncLog.Status.WAITING).order_by("-created_at").first()
+        
+        if not sync_log:
+            # Se não há log em espera, podemos tentar um sync se ainda não foi sincronizado
+            if invoice.status in {Invoice.Status.ISSUED, Invoice.Status.AGT_ERROR}:
+                return Response(
+                    {"detail": "Não há pedido pendente de validação. Use 'Sincronizar' primeiro."}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            return Response({"detail": "Documento já sincronizado ou em estado inválido para validação."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            poll_agt_status(sync_log_id=str(sync_log.id))
+            invoice.refresh_from_db()
+            return Response(self.get_serializer(invoice).data)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     @action(detail=True, methods=["get"], url_path="pdf")
     def pdf(self, request, pk=None):
         invoice = self.get_object()

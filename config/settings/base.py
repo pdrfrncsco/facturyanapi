@@ -195,3 +195,8 @@ CELERY_BEAT_SCHEDULE = {
 }
 
 AGT_MOCK_SYNC = os.getenv("AGT_MOCK_SYNC", "true").lower() == "true"
+AGT_ENVIRONMENT = os.getenv("AGT_ENVIRONMENT", "test")  # 'test' or 'prod'
+AGT_API_URL_TEST = os.getenv("AGT_API_URL_TEST", "https://testes-portalfiscal.minfin.gov.ao")
+AGT_API_URL_PROD = os.getenv("AGT_API_URL_PROD", "https://portalfiscal.minfin.gov.ao")
+AGT_API_USERNAME = os.getenv("AGT_API_USERNAME", "")  # Geralmente o NIF do Produtor ou do Software
+AGT_API_PASSWORD = os.getenv("AGT_API_PASSWORD", "")

@@ -147,21 +147,111 @@ class AgtClient:
         
         return self.submit(payload=payload)
 
+    def _get_base_url(self):
+        if settings.AGT_ENVIRONMENT == "prod":
+            return settings.AGT_API_URL_PROD
+        return settings.AGT_API_URL_TEST
+
+    def _get_auth_headers(self):
+        import base64
+        auth_str = f"{settings.AGT_API_USERNAME}:{settings.AGT_API_PASSWORD}"
+        encoded_auth = base64.b64encode(auth_str.encode()).decode()
+        return {
+            "Authorization": f"Basic {encoded_auth}",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+
     def submit(self, *, payload: dict[str, Any]) -> AgtSubmissionResult:
         """
         Submete o documento para a AGT. 
-        Implementação Mock habilitada via AGT_MOCK_SYNC.
+        Implementação Real com fallback para Mock via AGT_MOCK_SYNC.
         """
         if settings.AGT_MOCK_SYNC:
             return self._mock_submit(payload)
         
-        return AgtSubmissionResult(
-            success=False,
-            response_code="NOT_CONFIGURED",
-            response_payload={"detail": "Integração AGT real ainda não configurada."},
-            error_message="AGT API credentials not configured",
-            is_transient=False,
-        )
+        import requests
+        
+        action = payload.get("action", "issue")
+        # No payload de cancelamento, o 'action' pode estar dentro de 'document'
+        if action == "issue" and payload.get("document", {}).get("action") == "cancel":
+            action = "cancel"
+
+        endpoint_map = {
+            "issue": "/sigt/fe/v1/registarFactura",
+            "cancel": "/sigt/fe/v1/registarFactura",
+            "solicitarSerie": "/sigt/fe/v1/solicitarSerie",
+            "obterEstado": "/sigt/fe/v1/obterEstado",
+        }
+        
+        path = endpoint_map.get(action)
+        if not path:
+            return AgtSubmissionResult(
+                success=False,
+                response_code="INVALID_ACTION",
+                response_payload={},
+                error_message=f"Ação AGT desconhecida: {action}",
+                is_transient=False,
+            )
+             
+        url = f"{self._get_base_url()}{path}"
+        
+        try:
+            logger.info(f"Enviando pedido AGT '{action}' para {url}")
+            response = requests.post(
+                url, 
+                json=payload, 
+                headers=self._get_auth_headers(),
+                timeout=30
+            )
+            
+            status_code = response.status_code
+            
+            try:
+                data = response.json()
+            except ValueError:
+                data = {"raw_content": response.text}
+
+            if status_code >= 500:
+                return AgtSubmissionResult(
+                    success=False,
+                    response_code=str(status_code),
+                    response_payload=data,
+                    error_message=f"Erro de servidor AGT ({status_code})",
+                    is_transient=True
+                )
+            
+            success = status_code in (200, 201, 202)
+            error_msg = ""
+            if not success:
+                error_msg = data.get("detail") or data.get("message") or f"Erro AGT {status_code}"
+
+            return AgtSubmissionResult(
+                success=success,
+                response_code=str(status_code),
+                response_payload=data,
+                request_id=data.get("requestID") or data.get("requestId", ""),
+                error_message=error_msg,
+                is_transient=status_code in (429, 502, 503, 504)
+            )
+            
+        except requests.exceptions.Timeout:
+            return AgtSubmissionResult(
+                success=False,
+                response_code="TIMEOUT",
+                response_payload={},
+                error_message="Timeout na comunicação com a AGT.",
+                is_transient=True
+            )
+        except requests.exceptions.RequestException as e:
+            logger.exception("Erro de comunicação AGT")
+            return AgtSubmissionResult(
+                success=False,
+                response_code="CONNECTION_ERROR",
+                response_payload={},
+                error_message=f"Erro de conexão com AGT: {str(e)}",
+                is_transient=True
+            )
 
     def _mock_submit(self, payload: dict[str, Any]) -> AgtSubmissionResult:
         import time
