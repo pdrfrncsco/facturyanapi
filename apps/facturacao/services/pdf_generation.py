@@ -21,70 +21,97 @@ def _qr_image_bytes(data: str) -> bytes:
     return buffer.getvalue()
 
 
+from apps.common.services.pdf_engine import PdfEngine
+
+
 def generate_invoice_pdf_file(*, invoice: Invoice) -> ContentFile:
     buffer = io.BytesIO()
-    styles = getSampleStyleSheet()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm, topMargin=16 * mm, bottomMargin=16 * mm)
+    styles = PdfEngine.get_styles()
     elements = []
 
-    elements.append(Paragraph(f"<b>{invoice.empresa.name}</b>", styles["Title"]))
-    elements.append(Paragraph(f"NIF: {invoice.empresa.nif}", styles["Normal"]))
-    elements.append(Paragraph(f"{invoice.empresa.address}", styles["Normal"]))
-    elements.append(Spacer(1, 8))
+    # 1. Header: Empresa vs Documento
+    header_data = [
+        [
+            Paragraph(f"<b>{invoice.empresa.name}</b>", styles["Heading3"]),
+            Paragraph(f"<b>{invoice.type}</b>", styles["DocumentTitle"]),
+        ],
+        [
+            Paragraph(f"NIF: {invoice.empresa.nif}<br/>{invoice.empresa.address}", styles["Normal"]),
+            Paragraph(f"<font color='#1e3a8a'>NÚMERO:</font> <b>{invoice.invoice_no or 'RASCUNHO'}</b><br/>DATA: {invoice.issue_date}", styles["Normal"]),
+        ]
+    ]
+    header_table = Table(header_data, colWidths=[100 * mm, 80 * mm])
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 15 * mm))
 
-    elements.append(Paragraph(f"<b>{invoice.type} {invoice.invoice_no}</b>", styles["Heading2"]))
-    elements.append(Paragraph(f"Estado: {invoice.status}", styles["Normal"]))
-    elements.append(Paragraph(f"Data: {invoice.issue_date}", styles["Normal"]))
-    elements.append(Spacer(1, 8))
+    # 2. Cliente
+    client_data = [
+        [
+            Paragraph("ENTIDADE ADQUIRENTE", styles["DetailLabel"]),
+            ""
+        ],
+        [
+            Paragraph(f"<b>{invoice.client_name}</b>", styles["DetailValue"]),
+            Paragraph(f"NIF: {invoice.client_nif}", styles["DetailValue"])
+        ],
+        [
+            Paragraph(f"{invoice.client_address}", styles["Normal"]),
+            ""
+        ]
+    ]
+    client_table = Table(client_data, colWidths=[120 * mm, 60 * mm])
+    client_table.setStyle(TableStyle([
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+    ]))
+    elements.append(client_table)
+    elements.append(Spacer(1, 10 * mm))
 
-    elements.append(Paragraph(f"<b>Cliente:</b> {invoice.client_name}", styles["Normal"]))
-    elements.append(Paragraph(f"NIF Cliente: {invoice.client_nif}", styles["Normal"]))
-    elements.append(Paragraph(invoice.client_address, styles["Normal"]))
-    elements.append(Spacer(1, 10))
-
-    rows = [["Produto", "Qtd", "Preço", "IVA%", "Total"]]
+    # 3. Itens
+    rows = [["DESCRIÇÃO", "QTD", "PREÇO", "DESC%", "IVA%", "TOTAL"]]
     for item in invoice.items.all():
         rows.append([
             item.product_name,
-            str(item.quantity),
-            str(item.price),
-            str(item.tax_rate),
-            str(item.total),
+            f"{item.quantity:g}",
+            f"{item.price:,.2f}",
+            f"{item.discount:g}%",
+            f"{item.tax_rate:g}%",
+            f"{item.total:,.2f}",
         ])
-    table = Table(rows, colWidths=[80 * mm, 20 * mm, 25 * mm, 18 * mm, 25 * mm])
-    table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
-            ]
-        )
-    )
-    elements.append(table)
-    elements.append(Spacer(1, 12))
+    
+    items_table = PdfEngine.create_table(rows, col_widths=[75 * mm, 15 * mm, 25 * mm, 15 * mm, 15 * mm, 35 * mm])
+    elements.append(items_table)
+    elements.append(Spacer(1, 10 * mm))
 
-    totals = [
-        ["Subtotal", str(invoice.subtotal)],
-        ["Desconto", str(invoice.discount_total)],
-        ["IVA", str(invoice.tax_total)],
-        ["Retenção", str(invoice.withholding_tax_amount)],
-        ["Total", str(invoice.grand_total)],
+    # 4. Totais e Fiscal
+    footer_row = [
+        [
+            # Coluna Fiscal
+            Paragraph(f"<b>Hash:</b> {invoice.invoice_hash[:4]}-{invoice.invoice_hash[-4:]}", styles["FiscalInfo"]) if invoice.invoice_hash else "",
+            # Coluna Totais
+            PdfEngine.create_table([
+                ["SUBTOTAL", f"{invoice.subtotal:,.2f} {invoice.currency}"],
+                ["DESCONTO", f"{invoice.discount_total:,.2f}"],
+                ["IVA", f"{invoice.tax_total:,.2f}"],
+                ["RETENÇÃO", f"{invoice.withholding_tax_amount:,.2f}"],
+                ["TOTAL", f"{invoice.grand_total:,.2f} {invoice.currency}"],
+            ], col_widths=[30 * mm, 40 * mm], is_totals=True)
+        ]
     ]
-    totals_table = Table(totals, colWidths=[40 * mm, 40 * mm])
-    totals_table.setStyle(TableStyle([("ALIGN", (1, 0), (1, -1), "RIGHT"), ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold")]))
-    elements.append(totals_table)
-    elements.append(Spacer(1, 10))
-
-    elements.append(Paragraph(f"<b>Hash fiscal:</b> {invoice.invoice_hash}", styles["Normal"]))
+    footer_table = Table(footer_row, colWidths=[110 * mm, 70 * mm])
+    footer_table.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
+    elements.append(footer_table)
+    
     if invoice.qrcode_string:
-        elements.append(Image(io.BytesIO(_qr_image_bytes(invoice.qrcode_string)), width=35 * mm, height=35 * mm))
+        elements.append(Spacer(1, 5 * mm))
+        elements.append(PdfEngine.create_qr_code(invoice.qrcode_string, size=35 * mm))
 
-    doc.build(elements)
+    PdfEngine.generate_base_pdf(buffer, elements)
     buffer.seek(0)
-    filename = f"{invoice.invoice_no.replace('/', '_')}.pdf"
+    filename = f"{invoice.invoice_no.replace('/', '_') or 'DRAFT'}.pdf"
     return ContentFile(buffer.read(), name=filename)
 
 

@@ -1,10 +1,59 @@
 import logging
-from django.core.mail import send_mail
+from django.core.mail import EmailMessage, send_mail
 from django.conf import settings
 from django.template.loader import render_to_string
 from apps.facturacao.models import Invoice
 
 logger = logging.getLogger(__name__)
+
+def send_invoice_email(*, invoice: Invoice) -> bool:
+    """
+    Envia a factura por e-mail para o cliente, anexando o PDF.
+    """
+    try:
+        from apps.facturacao.services.pdf_generation import generate_invoice_pdf_file
+        
+        subject = f"Factura {invoice.invoice_no or 'Rascunho'} - {invoice.empresa.name}"
+        recipient_list = [invoice.client.email] if invoice.client.email else []
+        
+        if not recipient_list:
+            logger.warning(f"Cliente {invoice.client_name} não tem e-mail configurado.")
+            return False
+
+        body = f"""
+        Prezado(a) {invoice.client_name},
+        
+        Segue em anexo a factura {invoice.invoice_no or ''} referente aos nossos serviços/produtos.
+        
+        Detalhes do Documento:
+        - Número: {invoice.invoice_no or 'Provisório'}
+        - Data: {invoice.issue_date}
+        - Total: {invoice.grand_total:,.2f} {invoice.currency}
+        
+        Agradecemos a sua preferência.
+        
+        Atentamente,
+        {invoice.empresa.name}
+        """
+
+        email = EmailMessage(
+            subject=subject,
+            body=body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=recipient_list,
+        )
+
+        # Gerar e anexar PDF
+        pdf_content = generate_invoice_pdf_file(invoice=invoice)
+        email.attach(pdf_content.name, pdf_content.read(), "application/pdf")
+
+        email.send(fail_silently=False)
+        
+        logger.info(f"Factura {invoice.invoice_no} enviada por e-mail para {recipient_list}")
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao enviar e-mail de factura: {str(e)}")
+        return False
 
 def send_payment_reminder(*, invoice: Invoice) -> bool:
     """

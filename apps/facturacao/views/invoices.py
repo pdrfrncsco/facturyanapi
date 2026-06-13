@@ -144,6 +144,15 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(detail=True, methods=["post"], url_path="enviar-email")
+    def send_email(self, request, pk=None):
+        from apps.notificacoes.services.email import send_invoice_email
+        invoice = self.get_object()
+        success = send_invoice_email(invoice=invoice)
+        if success:
+            return Response({"detail": "E-mail enviado com sucesso."})
+        return Response({"detail": "Falha ao enviar e-mail. Verifique o e-mail do cliente."}, status=status.HTTP_400_BAD_REQUEST)
+
     @action(detail=True, methods=["get"], url_path="pdf")
     def pdf(self, request, pk=None):
         invoice = self.get_object()

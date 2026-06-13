@@ -41,3 +41,12 @@ class ReciboViewSet(viewsets.ModelViewSet):
             return Response(ReciboSerializer(issued_receipt).data)
         except ValueError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['get'])
+    def pdf(self, request, pk=None):
+        from django.http import FileResponse
+        from apps.pagamentos.services.pdf_generation import generate_receipt_pdf_file
+        
+        receipt = self.get_object()
+        pdf_file = generate_receipt_pdf_file(receipt=receipt)
+        return FileResponse(pdf_file.open('rb'), as_attachment=True, filename=pdf_file.name)

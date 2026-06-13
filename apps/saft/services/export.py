@@ -67,6 +67,16 @@ def _build_saft_xml(*, empresa: Empresa, year: int, month: int) -> bytes:
         ET.SubElement(prod_el, "ProductDescription").text = product.name
         ET.SubElement(prod_el, "ProductNumberCode").text = product.code
 
+    # 2.3 TaxTable
+    tax_table = ET.SubElement(master_files, "TaxTable")
+    # Exemplo: IVA Normal 14%
+    tax_entry = ET.SubElement(tax_table, "TaxTableEntry")
+    ET.SubElement(tax_entry, "TaxType").text = "IVA"
+    ET.SubElement(tax_entry, "TaxCountryRegion").text = "AO"
+    ET.SubElement(tax_entry, "TaxCode").text = "NOR"
+    ET.SubElement(tax_entry, "Description").text = "IVA Taxa Normal"
+    ET.SubElement(tax_entry, "TaxPercentage").text = "14.00"
+
     # 3. SourceDocuments
     source_docs = ET.SubElement(root, "SourceDocuments")
     
@@ -105,6 +115,17 @@ def _build_saft_xml(*, empresa: Empresa, year: int, month: int) -> bytes:
             ET.SubElement(line, "UnitPrice").text = str(money(item.price * rate))
             ET.SubElement(line, "Description").text = item.product_name
             
+            # Tax Information per line
+            tax = ET.SubElement(line, "Tax")
+            ET.SubElement(tax, "TaxType").text = "IVA"
+            ET.SubElement(tax, "TaxCountryRegion").text = "AO"
+            ET.SubElement(tax, "TaxCode").text = "NOR"
+            ET.SubElement(tax, "TaxPercentage").text = str(item.tax_rate)
+            
+            # Settlement / Discount per line
+            if item.discount > 0:
+                ET.SubElement(line, "SettlementAmount").text = str(money(item.price * item.quantity * (item.discount / 100) * rate))
+
             if invoice.type == Invoice.Type.NC and invoice.origin_document:
                 refs = ET.SubElement(line, "References")
                 ref = ET.SubElement(refs, "Reference")
