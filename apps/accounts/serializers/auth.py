@@ -17,6 +17,8 @@ class RegisterSerializer(serializers.Serializer):
     last_name = serializers.CharField(max_length=150)
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
+    company_name = serializers.CharField(max_length=255)
+    company_nif = serializers.CharField(max_length=20)
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
