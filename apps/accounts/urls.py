@@ -7,6 +7,8 @@ from apps.accounts.views.auth import (
     RegisterView,
     PasswordResetRequestView,
     PasswordResetConfirmView,
+    TenantMemberDetailView,
+    TenantMembersView,
     Setup2FAView,
     Verify2FAView
 )
@@ -21,4 +23,6 @@ urlpatterns = [
     path("login/", NDFaturaTokenObtainPairView.as_view(), name="token-obtain-pair"),
     path("refresh/", TokenRefreshView.as_view(), name="token-refresh"),
     path("me/", MeView.as_view(), name="me"),
+    path("members/", TenantMembersView.as_view(), name="tenant-members"),
+    path("members/<uuid:membership_id>/", TenantMemberDetailView.as_view(), name="tenant-member-detail"),
 ]

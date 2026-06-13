@@ -20,7 +20,10 @@ from apps.accounts.serializers.auth import (
     PasswordResetConfirmSerializer,
     Verify2FASerializer
 )
+from apps.accounts.serializers.members import TenantMemberSerializer, TenantMemberUpdateSerializer
 from apps.accounts.services.auth import register_user
+from apps.common.permissions import TenantRolePermission
+from apps.empresas.models import EmpresaMembership
 from apps.empresas.serializers.empresas import EmpresaSerializer
 from apps.empresas.selectors.memberships import empresas_for_user
 
@@ -142,3 +145,53 @@ class MeView(APIView):
                 "tenants": EmpresaSerializer(empresas_for_user(request.user), many=True).data,
             }
         )
+
+
+class TenantMembersView(APIView):
+    permission_classes = [TenantRolePermission]
+    role_permissions = {
+        "get": TenantRolePermission.ALL_ROLES,
+    }
+
+    def get(self, request):
+        empresa = getattr(request, "empresa", None)
+        if empresa is None:
+            return Response([], status=status.HTTP_200_OK)
+
+        memberships = (
+            EmpresaMembership.objects.filter(empresa=empresa)
+            .select_related("user")
+            .order_by("user__first_name", "user__last_name", "user__email")
+        )
+        serializer = TenantMemberSerializer(memberships, many=True, context={"request": request})
+        return Response(serializer.data)
+
+
+class TenantMemberDetailView(APIView):
+    permission_classes = [TenantRolePermission]
+    role_permissions = {
+        "patch": TenantRolePermission.FISCAL_MANAGER_ROLES,
+    }
+
+    def patch(self, request, membership_id):
+        empresa = getattr(request, "empresa", None)
+        if empresa is None:
+            return Response({"detail": "Empresa inválida."}, status=status.HTTP_400_BAD_REQUEST)
+
+        membership = (
+            EmpresaMembership.objects.select_related("user", "empresa")
+            .filter(id=membership_id, empresa=empresa)
+            .first()
+        )
+        if membership is None:
+            return Response({"detail": "Utilizador não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = TenantMemberUpdateSerializer(
+            membership,
+            data=request.data,
+            partial=True,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(TenantMemberSerializer(membership, context={"request": request}).data, status=status.HTTP_200_OK)
