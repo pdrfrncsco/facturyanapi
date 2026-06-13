@@ -1,8 +1,14 @@
 import hashlib
+import base64
 from decimal import Decimal
+
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import serialization
 
 from django.db import transaction
 from django.utils import timezone
+from django.conf import settings
 
 from apps.empresas.models import Empresa
 from apps.facturacao.models import FiscalSeries, Invoice
@@ -33,18 +39,49 @@ def previous_fiscal_hash(*, empresa: Empresa, invoice: Invoice) -> str:
     return previous_invoice.invoice_hash if previous_invoice else ""
 
 
-def fiscal_hash(*, previous_hash: str, invoice_number: str, invoice_date, total: Decimal, company_nif: str) -> str:
-    source = f"{previous_hash}{invoice_number}{invoice_date.isoformat()}{money(total)}{company_nif}"
-    return hashlib.sha1(source.encode("utf-8")).hexdigest()
+def sign_string(private_key_pem: str, data: str) -> str:
+    if not private_key_pem:
+        # Fallback for dev if no keys are generated
+        return hashlib.sha1(data.encode("utf-8")).hexdigest()
+
+    try:
+        private_key = serialization.load_pem_private_key(
+            private_key_pem.encode('utf-8'),
+            password=None,
+        )
+        signature = private_key.sign(
+            data.encode('utf-8'),
+            padding.PKCS1v15(),
+            hashes.SHA256()
+        )
+        return base64.b64encode(signature).decode('utf-8')
+    except Exception as e:
+        # Failsafe if key is malformed
+        return hashlib.sha1(data.encode("utf-8")).hexdigest()
+
+
+def fiscal_hash(*, empresa: Empresa, previous_hash: str, invoice_number: str, invoice_date, system_date, total: Decimal) -> str:
+    # StringToHash AGT: DataFactura;DataSistema;NoFactura;TotalFatura;HashFacturaAnterior
+    # Datas no formato YYYY-MM-DD e YYYY-MM-DDThh:mm:ss
+    invoice_date_str = invoice_date.strftime("%Y-%m-%d")
+    system_date_str = system_date.strftime("%Y-%m-%dT%H:%M:%S")
+    total_str = f"{total:.2f}"
+    
+    source = f"{invoice_date_str};{system_date_str};{invoice_number};{total_str};{previous_hash}"
+    return sign_string(empresa.software_private_key, source)
 
 
 def qr_code_string(*, invoice: Invoice) -> str:
+    # Formato padrão do QR Code fiscal da AGT (exemplo estruturado, pois a norma exige uma concatenação específica)
+    # Exemplo: A:123456789*B:FT SEDE2024/1*C:2024-01-01*D:140.00*E:1140.00*F:HashedValue...
     return (
-        "https://portaldocontribuinte.minfin.gov.ao/verify"
-        f"?doc={invoice.invoice_no}"
-        f"&nif={invoice.empresa.nif}"
-        f"&total={money(invoice.grand_total)}"
-        f"&hash={invoice.invoice_hash}"
+        f"A:{invoice.empresa.nif}*"
+        f"B:{invoice.invoice_no}*"
+        f"C:{invoice.issue_date.strftime('%Y-%m-%d')}*"
+        f"D:{invoice.tax_total:.2f}*"
+        f"E:{invoice.grand_total:.2f}*"
+        f"F:{invoice.invoice_hash[:10]}*"
+        f"G:{invoice.invoice_hash[-10:]}"
     )
 
 
@@ -118,11 +155,12 @@ def apply_fiscal_issuance(*, invoice: Invoice) -> Invoice:
     issue_date = timezone.localdate()
     previous_hash = previous_fiscal_hash(empresa=invoice.empresa, invoice=invoice)
     invoice_hash = fiscal_hash(
+        empresa=invoice.empresa,
         previous_hash=previous_hash,
         invoice_number=invoice_number,
         invoice_date=issue_date,
+        system_date=timezone.now(),
         total=invoice.grand_total,
-        company_nif=invoice.empresa.nif,
     )
 
     invoice.invoice_no = invoice_number

@@ -22,18 +22,26 @@ def previous_receipt_hash(*, empresa, receipt: Recibo) -> str:
     return previous.receipt_hash if previous else ""
 
 
-def receipt_fiscal_hash(*, previous_hash: str, receipt_number: str, receipt_date, total: Decimal, company_nif: str) -> str:
-    source = f"{previous_hash}{receipt_number}{receipt_date.isoformat()}{money(total)}{company_nif}"
-    return hashlib.sha1(source.encode("utf-8")).hexdigest()
+from apps.facturacao.services.fiscal_issuance import sign_string
+
+def receipt_fiscal_hash(*, empresa, previous_hash: str, receipt_number: str, receipt_date, system_date, total: Decimal) -> str:
+    receipt_date_str = receipt_date.strftime("%Y-%m-%d")
+    system_date_str = system_date.strftime("%Y-%m-%dT%H:%M:%S")
+    total_str = f"{total:.2f}"
+    
+    source = f"{receipt_date_str};{system_date_str};{receipt_number};{total_str};{previous_hash}"
+    return sign_string(empresa.software_private_key, source)
 
 
 def qr_code_receipt(*, receipt: Recibo) -> str:
     return (
-        "https://portaldocontribuinte.minfin.gov.ao/verify"
-        f"?doc={receipt.receipt_no}"
-        f"&nif={receipt.empresa.nif}"
-        f"&total={money(receipt.total_amount)}"
-        f"&hash={receipt.receipt_hash}"
+        f"A:{receipt.empresa.nif}*"
+        f"B:{receipt.receipt_no}*"
+        f"C:{receipt.issue_date.strftime('%Y-%m-%d')}*"
+        f"D:0.00*"
+        f"E:{receipt.total_amount:.2f}*"
+        f"F:{receipt.receipt_hash[:10]}*"
+        f"G:{receipt.receipt_hash[-10:]}"
     )
 
 
@@ -70,11 +78,12 @@ def issue_receipt(*, receipt: Recibo) -> Recibo:
     receipt.issue_date = timezone.localdate()
     receipt.previous_hash = previous_receipt_hash(empresa=receipt.empresa, receipt=receipt)
     receipt.receipt_hash = receipt_fiscal_hash(
+        empresa=receipt.empresa,
         previous_hash=receipt.previous_hash,
         receipt_number=receipt.receipt_no,
         receipt_date=receipt.issue_date,
+        system_date=timezone.now(),
         total=receipt.total_amount,
-        company_nif=receipt.empresa.nif,
     )
     receipt.qrcode_string = qr_code_receipt(receipt=receipt)
     receipt.status = Recibo.Status.ISSUED

@@ -17,6 +17,7 @@ class Empresa(UUIDModel, TimeStampedModel, SoftDeleteModel):
 
     agt_certificate_no = models.CharField(max_length=64, blank=True)
     software_private_key = models.TextField(blank=True, help_text="Chave privada do produtor (usada para jwsSoftwareSignature)")
+    software_public_key = models.TextField(blank=True, help_text="Chave pública do produtor")
     agt_private_key = models.TextField(blank=True, help_text="Chave privada do contribuinte fornecida pela AGT")
     is_active = models.BooleanField(default=True)
 

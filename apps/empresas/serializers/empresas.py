@@ -9,6 +9,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
     systemName = serializers.CharField(source="system_name", required=False)
     primaryColor = serializers.CharField(source="primary_color", required=False)
     agtCertificateNo = serializers.CharField(source="agt_certificate_no", allow_blank=True, required=False)
+    softwarePublicKey = serializers.CharField(source="software_public_key", read_only=True)
 
     class Meta:
         model = Empresa
@@ -24,4 +25,5 @@ class EmpresaSerializer(serializers.ModelSerializer):
             "systemName",
             "primaryColor",
             "agtCertificateNo",
+            "softwarePublicKey",
         ]
