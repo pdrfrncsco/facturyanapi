@@ -28,6 +28,12 @@ FISCAL_IMMUTABLE_FIELDS = (
     "qrcode_string",
     "origin_document_id",
     "rectification_reason",
+    "vehicle_plate",
+    "driver_name",
+    "loading_point",
+    "delivery_point",
+    "loading_date",
+    "delivery_date",
 )
 
 
@@ -62,6 +68,7 @@ class Invoice(TenantOwnedModel):
         NC = "NC", "Nota de Crédito"
         PP = "PP", "Factura Proforma"
         ND = "ND", "Nota de Débito"
+        GR = "GR", "Guia de Remessa"
 
     class Status(models.TextChoices):
         DRAFT = "Draft", "Rascunho"
@@ -117,6 +124,15 @@ class Invoice(TenantOwnedModel):
         blank=True,
         related_name="cancelled_invoices",
     )
+    
+    # Goods Movement Fields (GR specific)
+    vehicle_plate = models.CharField(max_length=32, null=True, blank=True, help_text="Matricula do veiculo")
+    driver_name = models.CharField(max_length=255, null=True, blank=True, help_text="Nome do motorista")
+    loading_point = models.TextField(null=True, blank=True, help_text="Local de carga")
+    delivery_point = models.TextField(null=True, blank=True, help_text="Local de descarga")
+    loading_date = models.DateTimeField(null=True, blank=True)
+    delivery_date = models.DateTimeField(null=True, blank=True)
+
     notes = models.TextField(blank=True)
     origin_document = models.ForeignKey(
         "self",

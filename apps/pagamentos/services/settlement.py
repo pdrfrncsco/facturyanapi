@@ -4,6 +4,7 @@ from apps.facturacao.models import Invoice
 from apps.pagamentos.models import Recibo, ReciboItem
 from apps.pagamentos.services.receipt_issuance import issue_receipt
 from apps.auditoria.services.audit_logs import create_audit_log
+from apps.integracoes.services import trigger_webhook
 
 
 @transaction.atomic
@@ -45,12 +46,27 @@ def finalize_settlement(*, receipt: Recibo, user=None, request=None):
         invoice = item.invoice
         invoice.paid_amount += item.amount_paid
         
+        old_status = invoice.status
         if invoice.paid_amount >= invoice.grand_total:
             invoice.status = Invoice.Status.PAID
         elif invoice.paid_amount > 0:
             invoice.status = Invoice.Status.PARTIAL
             
         invoice.save(update_fields=["status", "paid_amount", "updated_at"])
+        
+        # Webhook for invoice status change (paid/partial)
+        if invoice.status != old_status and invoice.status == Invoice.Status.PAID:
+            trigger_webhook(
+                empresa_id=invoice.empresa_id,
+                event_type="invoice.paid",
+                payload={
+                    "id": str(invoice.id),
+                    "invoiceNo": invoice.invoice_no,
+                    "paidAmount": float(invoice.paid_amount),
+                    "grandTotal": float(invoice.grand_total),
+                    "status": invoice.status
+                }
+            )
 
     create_audit_log(
         empresa=issued_receipt.empresa,
@@ -60,6 +76,20 @@ def finalize_settlement(*, receipt: Recibo, user=None, request=None):
         request=request,
         entity_type="recibo",
         entity_id=str(issued_receipt.id)
+    )
+
+    # Webhook for receipt
+    trigger_webhook(
+        empresa_id=issued_receipt.empresa_id,
+        event_type="receipt.issued",
+        payload={
+            "id": str(issued_receipt.id),
+            "receiptNo": issued_receipt.receipt_no,
+            "clientName": issued_receipt.client.name,
+            "totalAmount": float(issued_receipt.total_amount),
+            "paymentMethod": issued_receipt.payment_method,
+            "status": issued_receipt.status
+        }
     )
         
     return issued_receipt

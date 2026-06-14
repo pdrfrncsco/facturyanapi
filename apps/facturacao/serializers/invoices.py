@@ -32,6 +32,15 @@ class InvoiceSerializer(serializers.ModelSerializer):
     exchangeRate = serializers.DecimalField(source="exchange_rate", max_digits=18, decimal_places=4, read_only=True)
     publicToken = serializers.UUIDField(source="public_token", read_only=True)
     invoiceHash = serializers.CharField(source="invoice_hash", read_only=True)
+    
+    # Goods Movement
+    vehiclePlate = serializers.CharField(source="vehicle_plate", required=False, allow_null=True)
+    driverName = serializers.CharField(source="driver_name", required=False, allow_null=True)
+    loadingPoint = serializers.CharField(source="loading_point", required=False, allow_null=True)
+    deliveryPoint = serializers.CharField(source="delivery_point", required=False, allow_null=True)
+    loadingDate = serializers.DateTimeField(source="loading_date", required=False, allow_null=True)
+    deliveryDate = serializers.DateTimeField(source="delivery_date", required=False, allow_null=True)
+
     previousHash = serializers.CharField(source="previous_hash", read_only=True)
     agtSyncDate = serializers.DateTimeField(source="agt_sync_date", read_only=True)
     agtResponseCode = serializers.CharField(source="agt_response_code", read_only=True)
@@ -70,6 +79,12 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "withholdingTaxAmount",
             "grandTotal",
             "publicToken",
+            "vehiclePlate",
+            "driverName",
+            "loadingPoint",
+            "deliveryPoint",
+            "loadingDate",
+            "deliveryDate",
             "invoiceHash",
             "previousHash",
             "agtSyncDate",

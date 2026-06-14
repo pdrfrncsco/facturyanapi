@@ -17,6 +17,7 @@ from apps.facturacao.validators.invoices import (
     validate_invoice_is_draft,
     validate_invoice_items,
 )
+from apps.integracoes.services import trigger_webhook
 
 
 def _draft_number(invoice_type: str) -> str:
@@ -134,6 +135,14 @@ def create_draft_invoice(*, empresa: Empresa, user, data: dict, request=None) ->
         origin_document_id=data.get("origin_document_id"),
         rectification_reason=data.get("rectification_reason", ""),
         created_by=user,
+        
+        # Goods Movement (GR)
+        vehicle_plate=data.get("vehicle_plate"),
+        driver_name=data.get("driver_name"),
+        loading_point=data.get("loading_point"),
+        delivery_point=data.get("delivery_point"),
+        loading_date=data.get("loading_date"),
+        delivery_date=data.get("delivery_date"),
     )
 
     totals = _replace_items(invoice=invoice, empresa=empresa, items=validated_items)
@@ -196,6 +205,14 @@ def update_draft_invoice(*, invoice: Invoice, user, data: dict, request=None) ->
         invoice.origin_document_id = data["origin_document_id"]
     if "rectification_reason" in data:
         invoice.rectification_reason = data["rectification_reason"]
+
+    # Goods Movement
+    if "vehicle_plate" in data: invoice.vehicle_plate = data["vehicle_plate"]
+    if "driver_name" in data: invoice.driver_name = data["driver_name"]
+    if "loading_point" in data: invoice.loading_point = data["loading_point"]
+    if "delivery_point" in data: invoice.delivery_point = data["delivery_point"]
+    if "loading_date" in data: invoice.loading_date = data["loading_date"]
+    if "delivery_date" in data: invoice.delivery_date = data["delivery_date"]
 
     totals = _replace_items(invoice=invoice, empresa=invoice.empresa, items=validated_items)
     net_before_tax = totals["subtotal"] - totals["discount_total"]
@@ -313,6 +330,22 @@ def issue_invoice(*, invoice: Invoice, user, request=None) -> Invoice:
         entity_type="invoice",
         entity_id=str(invoice.id),
     )
+
+    # Webhook
+    trigger_webhook(
+        empresa_id=invoice.empresa_id,
+        event_type="invoice.issued",
+        payload={
+            "id": str(invoice.id),
+            "invoiceNo": invoice.invoice_no,
+            "type": invoice.type,
+            "clientName": invoice.client_name,
+            "clientNif": invoice.client_nif,
+            "grandTotal": float(invoice.grand_total),
+            "status": invoice.status
+        }
+    )
+
     return invoice
 
 
@@ -349,4 +382,17 @@ def cancel_invoice(*, invoice: Invoice, user, reason: str, request=None) -> Invo
         entity_type="invoice",
         entity_id=str(invoice.id),
     )
+
+    # Webhook
+    trigger_webhook(
+        empresa_id=invoice.empresa_id,
+        event_type="invoice.cancelled",
+        payload={
+            "id": str(invoice.id),
+            "invoiceNo": invoice.invoice_no,
+            "reason": reason,
+            "status": invoice.status
+        }
+    )
+
     return invoice
