@@ -13,6 +13,7 @@ from apps.facturacao.serializers.invoices import CancelInvoiceInputSerializer, D
 from apps.facturacao.services.agt_sync import enqueue_invoice_pdf, trigger_agt_sync
 from apps.facturacao.services.invoices import (
     cancel_invoice,
+    convert_proforma_to_invoice,
     create_draft_invoice,
     delete_draft_invoice,
     issue_invoice,
@@ -33,6 +34,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         "issue": TenantRolePermission.FISCAL_MANAGER_ROLES,
         "cancel": TenantRolePermission.FISCAL_MANAGER_ROLES,
         "sync_agt": TenantRolePermission.FISCAL_MANAGER_ROLES,
+        "convert": TenantRolePermission.WRITE_ROLES,
         "pdf": TenantRolePermission.ALL_ROLES,
     }
     search_fields = ["invoice_no", "client_name", "client_nif"]
@@ -93,6 +95,20 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         except DjangoValidationError as exc:
             self._raise_drf_validation(exc)
         return Response(self.get_serializer(invoice).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="converter")
+    def convert(self, request, pk=None):
+        target_type = request.data.get("type", "FT")
+        try:
+            invoice = convert_proforma_to_invoice(
+                proforma=self.get_object(),
+                user=request.user,
+                target_type=target_type,
+                request=request
+            )
+        except DjangoValidationError as exc:
+            self._raise_drf_validation(exc)
+        return Response(self.get_serializer(invoice).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="cancelar")
     def cancel(self, request, pk=None):

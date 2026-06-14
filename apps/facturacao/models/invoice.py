@@ -1,3 +1,4 @@
+import uuid
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -59,6 +60,7 @@ class Invoice(TenantOwnedModel):
         FR = "FR", "Factura-Recibo"
         VD = "VD", "Venda a Dinheiro"
         NC = "NC", "Nota de Crédito"
+        PP = "PP", "Factura Proforma"
 
     class Status(models.TextChoices):
         DRAFT = "Draft", "Rascunho"

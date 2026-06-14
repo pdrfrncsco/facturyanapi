@@ -235,6 +235,44 @@ def delete_draft_invoice(*, invoice: Invoice, user, request=None) -> None:
 
 
 @transaction.atomic
+def convert_proforma_to_invoice(*, proforma: Invoice, user, target_type: str, request=None) -> Invoice:
+    if proforma.type != Invoice.Type.PP:
+        raise ValidationError("Apenas documentos Proforma podem ser convertidos.")
+    
+    if proforma.status == Invoice.Status.CANCELLED:
+        raise ValidationError("Documentos cancelados nao podem ser convertidos.")
+
+    # Create a copy of the proforma as a new invoice draft
+    invoice_data = {
+        "client_id": str(proforma.client_id),
+        "type": target_type,
+        "currency": proforma.currency,
+        "exchange_rate": proforma.exchange_rate,
+        "withholding_tax_rate": proforma.withholding_tax_rate,
+        "notes": proforma.notes,
+        "estabelecimento_id": str(proforma.estabelecimento_id) if proforma.estabelecimento_id else None,
+        "items": []
+    }
+
+    for item in proforma.items.all():
+        invoice_data["items"].append({
+            "product_id": str(item.product_id),
+            "quantity": float(item.quantity),
+            "price": float(item.price),
+            "discount": float(item.discount)
+        })
+
+    new_invoice = create_draft_invoice(empresa=proforma.empresa, user=user, data=invoice_data, request=request)
+    
+    # link proforma to new invoice
+    new_invoice.origin_document = proforma
+    new_invoice.save(update_fields=["origin_document"])
+
+    # Automatically issue if possible
+    return issue_invoice(invoice=new_invoice, user=user, request=request)
+
+
+@transaction.atomic
 def issue_invoice(*, invoice: Invoice, user, request=None) -> Invoice:
     invoice = Invoice.objects.select_for_update().select_related("empresa", "estabelecimento").get(pk=invoice.pk)
     invoice = apply_fiscal_issuance(invoice=invoice)
