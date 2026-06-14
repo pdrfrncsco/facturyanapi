@@ -52,6 +52,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
     rectificationReason = serializers.CharField(source="rectification_reason", read_only=True)
     tenantId = serializers.UUIDField(source="empresa_id", read_only=True)
     createdBy = serializers.CharField(source="created_by.get_full_name", read_only=True)
+    multicaixaReference = serializers.SerializerMethodField()
     items = InvoiceItemSerializer(many=True, read_only=True)
 
     class Meta:
@@ -98,7 +99,14 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "rectificationReason",
             "tenantId",
             "createdBy",
+            "multicaixaReference",
         ]
+
+    def get_multicaixaReference(self, obj):
+        from apps.pagamentos.serializers.multicaixa import MulticaixaReferenceSerializer
+        if hasattr(obj, "multicaixa_reference"):
+            return MulticaixaReferenceSerializer(obj.multicaixa_reference).data
+        return None
 
 
 class DraftInvoiceItemInputSerializer(serializers.Serializer):

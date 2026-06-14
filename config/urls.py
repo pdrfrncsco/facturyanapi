@@ -9,6 +9,7 @@ from apps.empresas.views.empresas import EmpresaViewSet
 from apps.empresas.views.estabelecimentos import EstabelecimentoViewSet
 from apps.facturacao.views.invoices import InvoiceViewSet
 from apps.facturacao.views.public import PublicInvoiceDetailView
+from apps.integracoes.views import MulticaixaWebhookView
 from apps.facturacao.views.recurring import RecurringInvoiceViewSet
 from apps.facturacao.views.currency import ExchangeRateViewSet
 from apps.pagamentos.views.recibos import ReciboViewSet
@@ -36,6 +37,7 @@ urlpatterns = [
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
     path("api/v1/auth/", include("apps.accounts.urls")),
     path("api/v1/public/facturas/<uuid:token>/", PublicInvoiceDetailView.as_view(), name="public-invoice-detail"),
+    path("api/v1/public/webhooks/multicaixa/", MulticaixaWebhookView.as_view(), name="public-multicaixa-webhook"),
     path("api/v1/dashboard/stats/", DashboardStatsView.as_view(), name="dashboard-stats"),
     path("api/v1/relatorios/", include("apps.relatorios.urls")),
     path("api/v1/saft/export/", SaftExportView.as_view(), name="saft-export"),

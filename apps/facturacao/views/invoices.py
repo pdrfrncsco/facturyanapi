@@ -35,6 +35,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         "cancel": TenantRolePermission.FISCAL_MANAGER_ROLES,
         "sync_agt": TenantRolePermission.FISCAL_MANAGER_ROLES,
         "convert": TenantRolePermission.WRITE_ROLES,
+        "multicaixa_reference": TenantRolePermission.ALL_ROLES,
         "pdf": TenantRolePermission.ALL_ROLES,
     }
     search_fields = ["invoice_no", "client_name", "client_nif"]
@@ -159,6 +160,23 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             return Response(self.get_serializer(invoice).data)
         except Exception as e:
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=["post"], url_path="multicaixa-referencia")
+    def multicaixa_reference(self, request, pk=None):
+        from apps.pagamentos.services.multicaixa import create_multicaixa_reference
+        from apps.pagamentos.serializers.multicaixa import MulticaixaReferenceSerializer
+        
+        invoice = self.get_object()
+        if invoice.status == Invoice.Status.DRAFT:
+            raise ValidationError({"status": "Emita a factura antes de gerar referência de pagamento."})
+        
+        try:
+            reference = create_multicaixa_reference(invoice=invoice)
+            return Response(MulticaixaReferenceSerializer(reference).data, status=status.HTTP_201_CREATED)
+        except DjangoValidationError as exc:
+            self._raise_drf_validation(exc)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=["post"], url_path="enviar-email")
     def send_email(self, request, pk=None):
