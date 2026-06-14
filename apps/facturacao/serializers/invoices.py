@@ -30,6 +30,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
     withholdingTaxAmount = serializers.DecimalField(source="withholding_tax_amount", max_digits=18, decimal_places=2, read_only=True)
     grandTotal = serializers.DecimalField(source="grand_total", max_digits=18, decimal_places=2, read_only=True)
     exchangeRate = serializers.DecimalField(source="exchange_rate", max_digits=18, decimal_places=4, read_only=True)
+    publicToken = serializers.UUIDField(source="public_token", read_only=True)
     invoiceHash = serializers.CharField(source="invoice_hash", read_only=True)
     previousHash = serializers.CharField(source="previous_hash", read_only=True)
     agtSyncDate = serializers.DateTimeField(source="agt_sync_date", read_only=True)
@@ -68,6 +69,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "withholdingTaxRate",
             "withholdingTaxAmount",
             "grandTotal",
+            "publicToken",
             "invoiceHash",
             "previousHash",
             "agtSyncDate",

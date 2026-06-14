@@ -61,6 +61,7 @@ class Invoice(TenantOwnedModel):
         VD = "VD", "Venda a Dinheiro"
         NC = "NC", "Nota de Crédito"
         PP = "PP", "Factura Proforma"
+        ND = "ND", "Nota de Débito"
 
     class Status(models.TextChoices):
         DRAFT = "Draft", "Rascunho"
@@ -85,6 +86,9 @@ class Invoice(TenantOwnedModel):
     # Currency fields
     currency = models.CharField(max_length=3, default="AOA")
     exchange_rate = models.DecimalField(max_digits=18, decimal_places=4, default=1)
+    
+    # Public access token for Customer Portal
+    public_token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     
     issue_date = models.DateField(null=True, blank=True)
     due_date = models.DateField(null=True, blank=True)
