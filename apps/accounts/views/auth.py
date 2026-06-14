@@ -20,7 +20,7 @@ from apps.accounts.serializers.auth import (
     PasswordResetConfirmSerializer,
     Verify2FASerializer
 )
-from apps.accounts.serializers.members import TenantMemberSerializer, TenantMemberUpdateSerializer
+from apps.accounts.serializers.members import TenantMemberCreateSerializer, TenantMemberSerializer, TenantMemberUpdateSerializer
 from apps.accounts.services.auth import register_user
 from apps.common.permissions import TenantRolePermission
 from apps.empresas.models import EmpresaMembership
@@ -151,6 +151,7 @@ class TenantMembersView(APIView):
     permission_classes = [TenantRolePermission]
     role_permissions = {
         "get": TenantRolePermission.ALL_ROLES,
+        "post": {"Admin"},
     }
 
     def get(self, request):
@@ -166,11 +167,24 @@ class TenantMembersView(APIView):
         serializer = TenantMemberSerializer(memberships, many=True, context={"request": request})
         return Response(serializer.data)
 
+    def post(self, request):
+        empresa = getattr(request, "empresa", None)
+        if empresa is None:
+            return Response({"detail": "Empresa inválida."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = TenantMemberCreateSerializer(data=request.data, context={"request": request, "empresa": empresa})
+        serializer.is_valid(raise_exception=True)
+        membership = serializer.save()
+        return Response(
+            TenantMemberSerializer(membership, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
 
 class TenantMemberDetailView(APIView):
     permission_classes = [TenantRolePermission]
     role_permissions = {
-        "patch": TenantRolePermission.FISCAL_MANAGER_ROLES,
+        "patch": {"Admin"},
     }
 
     def patch(self, request, membership_id):

@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from rest_framework import serializers
 
 from apps.empresas.models import EmpresaMembership
@@ -75,3 +76,61 @@ class TenantMemberUpdateSerializer(serializers.Serializer):
             user.save(update_fields=updated_fields)
 
         return instance
+
+
+class TenantMemberCreateSerializer(serializers.Serializer):
+    firstName = serializers.CharField(max_length=150)
+    lastName = serializers.CharField(max_length=150, allow_blank=True, required=False)
+    email = serializers.EmailField()
+    role = serializers.ChoiceField(choices=User.Role.choices)
+    password = serializers.CharField(write_only=True, min_length=8)
+    membershipRole = serializers.ChoiceField(
+        choices=EmpresaMembership.Role.choices,
+        default=EmpresaMembership.Role.MEMBER,
+        required=False,
+    )
+
+    def validate_email(self, value: str) -> str:
+        return value.strip().lower()
+
+    def validate(self, attrs):
+        empresa = self.context["empresa"]
+        email = attrs["email"]
+        user = User.objects.filter(email=email).first()
+
+        if user and EmpresaMembership.objects.filter(user=user, empresa=empresa).exists():
+            raise serializers.ValidationError({"email": "Este utilizador já pertence à empresa activa."})
+
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        empresa = self.context["empresa"]
+        email = validated_data["email"]
+        user = User.objects.filter(email=email).first()
+
+        if user is None:
+            username = email[:150]
+            if User.objects.filter(username=username).exists():
+                username = f"{email.split('@')[0][:120]}-{User.objects.count() + 1}"
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                first_name=validated_data["firstName"],
+                last_name=validated_data.get("lastName", ""),
+                password=validated_data["password"],
+                role=validated_data["role"],
+            )
+        else:
+            user.role = validated_data["role"]
+            if not user.is_active:
+                user.is_active = True
+            user.save(update_fields=["role", "is_active"])
+
+        return EmpresaMembership.objects.create(
+            user=user,
+            empresa=empresa,
+            role=validated_data.get("membershipRole", EmpresaMembership.Role.MEMBER),
+            is_default=False,
+            is_active=True,
+        )
