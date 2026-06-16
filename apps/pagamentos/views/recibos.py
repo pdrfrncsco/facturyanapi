@@ -5,13 +5,22 @@ from apps.clientes.models import Client
 from apps.common.permissions import TenantRolePermission
 from apps.pagamentos.models import Recibo
 from apps.pagamentos.serializers.recibo import ReciboSerializer, SettlementCreateSerializer
-from apps.pagamentos.services.settlement import create_settlement_receipt, finalize_settlement
+from apps.pagamentos.services.settlement import create_settlement_receipt, finalize_settlement, cancel_receipt
 
 
 class ReciboViewSet(viewsets.ModelViewSet):
     queryset = Recibo.objects.all()
     serializer_class = ReciboSerializer
     permission_classes = [TenantRolePermission]
+    role_permissions = {
+        "list": TenantRolePermission.ALL_ROLES,
+        "retrieve": TenantRolePermission.ALL_ROLES,
+        "create": TenantRolePermission.WRITE_ROLES,
+        "emitir": TenantRolePermission.FISCAL_MANAGER_ROLES,
+        "cancelar": TenantRolePermission.FISCAL_MANAGER_ROLES,
+        "enviar_email": TenantRolePermission.ALL_ROLES,
+        "pdf": TenantRolePermission.ALL_ROLES,
+    }
 
     def get_queryset(self):
         return self.queryset.filter(empresa=self.request.empresa)
@@ -49,6 +58,28 @@ class ReciboViewSet(viewsets.ModelViewSet):
             return Response(ReciboSerializer(issued_receipt).data)
         except ValueError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='cancelar')
+    def cancelar(self, request, pk=None):
+        receipt = self.get_object()
+        try:
+            cancelled_receipt = cancel_receipt(
+                receipt=receipt,
+                user=request.user,
+                request=request
+            )
+            return Response(ReciboSerializer(cancelled_receipt).data)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='enviar-email')
+    def enviar_email(self, request, pk=None):
+        from apps.notificacoes.services.email import send_receipt_email
+        receipt = self.get_object()
+        success = send_receipt_email(receipt=receipt)
+        if success:
+            return Response({"status": "sent"})
+        return Response({"detail": "Falha ao enviar e-mail."}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):

@@ -93,3 +93,46 @@ def finalize_settlement(*, receipt: Recibo, user=None, request=None):
     )
         
     return issued_receipt
+
+
+@transaction.atomic
+def cancel_receipt(*, receipt: Recibo, user=None, request=None):
+    if receipt.status == Recibo.Status.CANCELLED:
+        return receipt
+    
+    receipt.status = Recibo.Status.CANCELLED
+    receipt.save(update_fields=["status", "updated_at"])
+
+    for item in receipt.items.all():
+        invoice = item.invoice
+        invoice.paid_amount -= item.amount_paid
+        
+        if invoice.paid_amount <= 0:
+            invoice.status = Invoice.Status.ISSUED
+            invoice.paid_amount = Decimal("0.00")
+        else:
+            invoice.status = Invoice.Status.PARTIAL
+            
+        invoice.save(update_fields=["status", "paid_amount", "updated_at"])
+
+    create_audit_log(
+        empresa=receipt.empresa,
+        user=user,
+        action="CANCEL_RECEIPT",
+        details=f"Recibo {receipt.receipt_no} cancelado. Estornos realizados nas facturas associadas.",
+        request=request,
+        entity_type="recibo",
+        entity_id=str(receipt.id)
+    )
+
+    trigger_webhook(
+        empresa_id=receipt.empresa_id,
+        event_type="receipt.cancelled",
+        payload={
+            "id": str(receipt.id),
+            "receiptNo": receipt.receipt_no,
+            "status": receipt.status
+        }
+    )
+
+    return receipt

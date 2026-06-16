@@ -3,8 +3,60 @@ from django.core.mail import EmailMessage, send_mail
 from django.conf import settings
 from django.template.loader import render_to_string
 from apps.facturacao.models import Invoice
+from apps.pagamentos.models import Recibo
 
 logger = logging.getLogger(__name__)
+
+
+def send_receipt_email(*, receipt: Recibo) -> bool:
+    """
+    Envia o recibo por e-mail para o cliente, anexando o PDF.
+    """
+    try:
+        from apps.pagamentos.services.pdf_generation import generate_receipt_pdf_file
+        
+        subject = f"Recibo {receipt.receipt_no or 'Rascunho'} - {receipt.empresa.name}"
+        recipient_list = [receipt.client.email] if receipt.client.email else []
+        
+        if not recipient_list:
+            logger.warning(f"Cliente {receipt.client.name} não tem e-mail configurado.")
+            return False
+
+        body = f"""
+        Prezado(a) {receipt.client.name},
+        
+        Segue em anexo o recibo {receipt.receipt_no or ''} referente ao pagamento efectuado.
+        
+        Detalhes do Recibo:
+        - Número: {receipt.receipt_no or 'Provisório'}
+        - Data: {receipt.issue_date}
+        - Total Pago: {receipt.total_amount:,.2f} AOA
+        
+        Agradecemos a sua preferência.
+        
+        Atentamente,
+        {receipt.empresa.name}
+        """
+
+        email = EmailMessage(
+            subject=subject,
+            body=body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=recipient_list,
+        )
+
+        # Gerar e anexar PDF
+        pdf_content = generate_receipt_pdf_file(receipt=receipt)
+        email.attach(pdf_content.name, pdf_content.read(), "application/pdf")
+
+        email.send(fail_silently=False)
+        
+        logger.info(f"Recibo {receipt.receipt_no} enviado por e-mail para {recipient_list}")
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao enviar e-mail de recibo: {str(e)}")
+        return False
+
 
 def send_invoice_email(*, invoice: Invoice) -> bool:
     """
