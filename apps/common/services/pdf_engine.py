@@ -20,14 +20,16 @@ class PdfEngine:
             name='FiscalInfo',
             fontSize=7,
             leading=8,
-            textColor=colors.grey
+            textColor=colors.grey,
+            wordWrap='CJK'
         ))
         styles.add(ParagraphStyle(
             name='DocumentTitle',
             parent=styles['Heading1'],
             fontSize=24,
             spaceAfter=20,
-            textColor=colors.HexColor("#1e3a8a")
+            textColor=colors.HexColor("#1e3a8a"),
+            alignment=2 # Right
         ))
         styles.add(ParagraphStyle(
             name='DetailLabel',
@@ -39,7 +41,21 @@ class PdfEngine:
         styles.add(ParagraphStyle(
             name='DetailValue',
             fontSize=10,
-            fontName='Helvetica'
+            fontName='Helvetica',
+            leading=12
+        ))
+        styles.add(ParagraphStyle(
+            name='TableCell',
+            fontSize=8,
+            fontName='Helvetica',
+            leading=10
+        ))
+        styles.add(ParagraphStyle(
+            name='TableHeader',
+            fontSize=9,
+            fontName='Helvetica-Bold',
+            textColor=colors.white,
+            alignment=1 # Center
         ))
         return styles
 
@@ -51,7 +67,8 @@ class PdfEngine:
             leftMargin=15 * mm, 
             rightMargin=15 * mm, 
             topMargin=15 * mm, 
-            bottomMargin=25 * mm
+            bottomMargin=25 * mm,
+            allowSplitting=1
         )
         
         def footer(canvas, doc):
@@ -92,6 +109,7 @@ class PdfEngine:
                 ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, -1), (-1, -1), 12),
                 ('TOPPADDING', (0, -1), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, -1), (-1, -1), 5),
             ])
         else:
             ts = TableStyle([
@@ -101,11 +119,14 @@ class PdfEngine:
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, 0), 9),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                ('TOPPADDING', (0, 0), (-1, 0), 8),
                 ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
                 ('FONTSIZE', (0, 1), (-1, -1), 8),
                 ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
                 ('GRID', (0, 0), (-1, -1), 0.1, colors.lightgrey),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
             ])
         
-        return Table(data, colWidths=col_widths, style=ts)
+        return Table(data, colWidths=col_widths, style=ts, hAlign='LEFT')

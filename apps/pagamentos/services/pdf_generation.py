@@ -59,13 +59,18 @@ def generate_receipt_pdf_file(*, receipt: Recibo) -> ContentFile:
     elements.append(Paragraph("<font color='grey' size='8'><b>DOCUMENTOS LIQUIDADOS</b></font>", styles["Normal"]))
     elements.append(Spacer(1, 4 * mm))
     
-    rows = [["DOCUMENTO", "DATA", "TOTAL DOC", "VALOR PAGO"]]
+    rows = [[
+        Paragraph("DOCUMENTO", styles["TableHeader"]),
+        Paragraph("DATA", styles["TableHeader"]),
+        Paragraph("TOTAL DOC", styles["TableHeader"]),
+        Paragraph("VALOR PAGO", styles["TableHeader"])
+    ]]
     for item in receipt.items.all():
         rows.append([
-            item.invoice.invoice_no,
-            str(item.invoice.issue_date),
-            f"{item.invoice.grand_total:,.2f} {item.invoice.currency}",
-            f"{item.amount_paid:,.2f} {item.invoice.currency}",
+            Paragraph(item.invoice.invoice_no, styles["TableCell"]),
+            Paragraph(str(item.invoice.issue_date), styles["TableCell"]),
+            Paragraph(f"{item.invoice.grand_total:,.2f} {item.invoice.currency}", styles["TableCell"]),
+            Paragraph(f"{item.amount_paid:,.2f} {item.invoice.currency}", styles["TableCell"]),
         ])
     
     items_table = PdfEngine.create_table(rows, col_widths=[60 * mm, 35 * mm, 42.5 * mm, 42.5 * mm])
@@ -78,8 +83,8 @@ def generate_receipt_pdf_file(*, receipt: Recibo) -> ContentFile:
             Paragraph(f"<font size='8' color='grey'><b>OBSERVAÇÕES</b></font><br/>"
                       f"<font size='9'>{receipt.notes or '-'}</font>", styles["Normal"]),
             PdfEngine.create_table([
-                ["MÉTODO", receipt.get_payment_method_display().upper()],
-                ["TOTAL LIQUIDADO", f"{receipt.total_amount:,.2f} AOA"],
+                [Paragraph("MÉTODO", styles["TableCell"]), Paragraph(receipt.get_payment_method_display().upper(), styles["TableCell"])],
+                [Paragraph("TOTAL LIQUIDADO", styles["TableHeader"]), Paragraph(f"<b>{receipt.total_amount:,.2f} AOA</b>", styles["TableHeader"])],
             ], col_widths=[35 * mm, 45 * mm], is_totals=True)
         ]
     ]

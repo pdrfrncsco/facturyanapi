@@ -29,18 +29,19 @@ def generate_invoice_pdf_file(*, invoice: Invoice) -> ContentFile:
     styles = PdfEngine.get_styles()
     elements = []
 
-    # 1. Header: Empresa vs Documento
+    # 1. Header with modern layout
     header_data = [
         [
-            Paragraph(f"<b>{invoice.empresa.name}</b>", styles["Heading3"]),
-            Paragraph(f"<b>{invoice.type}</b>", styles["DocumentTitle"]),
-        ],
-        [
-            Paragraph(f"NIF: {invoice.empresa.nif}<br/>{invoice.empresa.address}", styles["Normal"]),
-            Paragraph(f"<font color='#1e3a8a'>NÚMERO:</font> <b>{invoice.invoice_no or 'RASCUNHO'}</b><br/>DATA: {invoice.issue_date}", styles["Normal"]),
+            Paragraph(f"<font size='14' color='#1e3a8a'><b>{invoice.empresa.name}</b></font><br/>"
+                      f"<font color='grey' size='8'>NIF: {invoice.empresa.nif}<br/>"
+                      f"{invoice.empresa.address}<br/>"
+                      f"{invoice.empresa.city}, Angola</font>", styles["Normal"]),
+            Paragraph(f"<font color='#1e3a8a' size='22'><b>{invoice.get_type_display().upper()}</b></font><br/>"
+                      f"<font size='12'><b>{invoice.invoice_no or 'RASCUNHO'}</b></font><br/>"
+                      f"<font color='grey' size='9'>Data: {invoice.issue_date}</font>", styles["Normal"]),
         ]
     ]
-    header_table = Table(header_data, colWidths=[100 * mm, 80 * mm])
+    header_table = Table(header_data, colWidths=[110 * mm, 70 * mm])
     header_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
@@ -48,66 +49,107 @@ def generate_invoice_pdf_file(*, invoice: Invoice) -> ContentFile:
     elements.append(header_table)
     elements.append(Spacer(1, 15 * mm))
 
-    # 2. Cliente
-    client_data = [
+    # 2. Cliente Highlight Box
+    client_box_data = [
         [
-            Paragraph("ENTIDADE ADQUIRENTE", styles["DetailLabel"]),
+            Paragraph("<font color='#1e3a8a' size='8'><b>ENTIDADE ADQUIRENTE</b></font>", styles["Normal"]),
             ""
         ],
         [
-            Paragraph(f"<b>{invoice.client_name}</b>", styles["DetailValue"]),
-            Paragraph(f"NIF: {invoice.client_nif}", styles["DetailValue"])
-        ],
-        [
-            Paragraph(f"{invoice.client_address}", styles["Normal"]),
-            ""
+            Paragraph(f"<font size='12'><b>{invoice.client_name}</b></font><br/>"
+                      f"<font color='grey' size='9'>NIF: {invoice.client_nif}<br/>"
+                      f"{invoice.client_address}</font>", styles["Normal"]),
+            Paragraph(f"<font color='#1e3a8a' size='8'>VALOR TOTAL DO DOCUMENTO</font><br/>"
+                      f"<font size='16'><b>{invoice.grand_total:,.2f} {invoice.currency}</b></font>", styles["Normal"])
         ]
     ]
-    client_table = Table(client_data, colWidths=[120 * mm, 60 * mm])
+    client_table = Table(client_box_data, colWidths=[120 * mm, 60 * mm])
     client_table.setStyle(TableStyle([
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.whitesmoke),
+        ('BOX', (0, 0), (-1, -1), 0.1, colors.lightgrey),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('ALIGN', (1, 1), (1, 1), 'RIGHT'),
     ]))
     elements.append(client_table)
-    elements.append(Spacer(1, 10 * mm))
+    elements.append(Spacer(1, 12 * mm))
 
-    # 3. Itens
-    rows = [["DESCRIÇÃO", "QTD", "PREÇO", "DESC%", "IVA%", "TOTAL"]]
+    # 2.5 Goods Movement (Only if GR or has data)
+    if invoice.type == Invoice.Type.GR or invoice.vehicle_plate:
+        elements.append(Paragraph("<font color='grey' size='8'><b>CIRCULAÇÃO DE MERCADORIAS</b></font>", styles["Normal"]))
+        elements.append(Spacer(1, 2 * mm))
+        movement_data = [
+            [
+                Paragraph(f"<b>Viatura:</b> {invoice.vehicle_plate or '-'}<br/>"
+                          f"<b>Motorista:</b> {invoice.driver_name or '-'}", styles["FiscalInfo"]),
+                Paragraph(f"<b>Carga:</b> {invoice.loading_date or '-'}<br/>"
+                          f"<b>Descarga:</b> {invoice.delivery_date or '-'}", styles["FiscalInfo"]),
+                Paragraph(f"<b>Ponto de Carga:</b> {invoice.loading_point or '-'}<br/>"
+                          f"<b>Ponto de Descarga:</b> {invoice.delivery_point or '-'}", styles["FiscalInfo"])
+            ]
+        ]
+        movement_table = Table(movement_data, colWidths=[60 * mm, 60 * mm, 60 * mm])
+        movement_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.1, colors.lightgrey),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
+        elements.append(movement_table)
+        elements.append(Spacer(1, 10 * mm))
+
+    # 3. Itens Table
+    rows = [[
+        Paragraph("DESCRIÇÃO", styles["TableHeader"]),
+        Paragraph("QTD", styles["TableHeader"]),
+        Paragraph("PREÇO", styles["TableHeader"]),
+        Paragraph("DESC%", styles["TableHeader"]),
+        Paragraph("IVA%", styles["TableHeader"]),
+        Paragraph("TOTAL", styles["TableHeader"])
+    ]]
     for item in invoice.items.all():
         rows.append([
-            item.product_name,
-            f"{item.quantity:g}",
-            f"{item.price:,.2f}",
-            f"{item.discount:g}%",
-            f"{item.tax_rate:g}%",
-            f"{item.total:,.2f}",
+            Paragraph(item.product_name, styles["TableCell"]),
+            Paragraph(f"{item.quantity:g}", styles["TableCell"]),
+            Paragraph(f"{item.price:,.2f}", styles["TableCell"]),
+            Paragraph(f"{item.discount:g}%", styles["TableCell"]),
+            Paragraph(f"{item.tax_rate:g}%", styles["TableCell"]),
+            Paragraph(f"{item.total:,.2f}", styles["TableCell"]),
         ])
     
-    items_table = PdfEngine.create_table(rows, col_widths=[75 * mm, 15 * mm, 25 * mm, 15 * mm, 15 * mm, 35 * mm])
+    items_table = PdfEngine.create_table(rows, col_widths=[70 * mm, 15 * mm, 25 * mm, 15 * mm, 15 * mm, 40 * mm])
     elements.append(items_table)
     elements.append(Spacer(1, 10 * mm))
 
-    # 4. Totais e Fiscal
-    footer_row = [
+    # 4. Totals and Notes
+    summary_data = [
         [
-            # Coluna Fiscal
-            Paragraph(f"<b>Hash:</b> {invoice.invoice_hash[:4]}-{invoice.invoice_hash[-4:]}", styles["FiscalInfo"]) if invoice.invoice_hash else "",
-            # Coluna Totais
+            Paragraph(f"<font size='8' color='grey'><b>OBSERVAÇÕES / REGIME FISCAL</b></font><br/>"
+                      f"<font size='8'>{invoice.notes or '-'}</font><br/><br/>"
+                      f"<font size='8' color='grey'>Regime:</font> <font size='8'>{invoice.empresa.fiscal_regime or 'REGIME GERAL'}</font>", styles["Normal"]),
             PdfEngine.create_table([
-                ["SUBTOTAL", f"{invoice.subtotal:,.2f} {invoice.currency}"],
-                ["DESCONTO", f"{invoice.discount_total:,.2f}"],
-                ["IVA", f"{invoice.tax_total:,.2f}"],
-                ["RETENÇÃO", f"{invoice.withholding_tax_amount:,.2f}"],
-                ["TOTAL", f"{invoice.grand_total:,.2f} {invoice.currency}"],
-            ], col_widths=[30 * mm, 40 * mm], is_totals=True)
+                [Paragraph("SUBTOTAL", styles["TableCell"]), Paragraph(f"{invoice.subtotal:,.2f}", styles["TableCell"])],
+                [Paragraph("DESCONTO", styles["TableCell"]), Paragraph(f"{invoice.discount_total:,.2f}", styles["TableCell"])],
+                [Paragraph("IVA", styles["TableCell"]), Paragraph(f"{invoice.tax_total:,.2f}", styles["TableCell"])],
+                [Paragraph("RETENÇÃO", styles["TableCell"]), Paragraph(f"{invoice.withholding_tax_amount:,.2f}", styles["TableCell"])],
+                [Paragraph("TOTAL A PAGAR", styles["TableHeader"]), Paragraph(f"<b>{invoice.grand_total:,.2f} {invoice.currency}</b>", styles["TableHeader"])],
+            ], col_widths=[35 * mm, 45 * mm], is_totals=True)
         ]
     ]
-    footer_table = Table(footer_row, colWidths=[110 * mm, 70 * mm])
-    footer_table.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
-    elements.append(footer_table)
-    
+    summary_table = Table(summary_data, colWidths=[100 * mm, 80 * mm])
+    summary_table.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP')]))
+    elements.append(summary_table)
+    elements.append(Spacer(1, 15 * mm))
+
+    # 5. Fiscal Section
+    if invoice.invoice_hash:
+        elements.append(Paragraph(f"<font color='#10b981' size='8'><b>ASSINATURA DIGITAL FISCAL (AGT)</b></font>", styles["Normal"]))
+        elements.append(Spacer(1, 2 * mm))
+        elements.append(Paragraph(f"<font face='Courier' size='7' color='grey'>{invoice.invoice_hash}</font>", styles["Normal"]))
+        elements.append(Spacer(1, 8 * mm))
+
     if invoice.qrcode_string:
-        elements.append(Spacer(1, 5 * mm))
         elements.append(PdfEngine.create_qr_code(invoice.qrcode_string, size=35 * mm))
+        elements.append(Spacer(1, 2 * mm))
+        elements.append(Paragraph("<font size='7' color='grey'>Digitalize para validar na AGT</font>", styles["Normal"]))
 
     PdfEngine.generate_base_pdf(buffer, elements)
     buffer.seek(0)
