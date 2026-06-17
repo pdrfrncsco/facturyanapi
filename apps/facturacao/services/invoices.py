@@ -18,6 +18,11 @@ from apps.facturacao.validators.invoices import (
     validate_invoice_items,
 )
 from apps.integracoes.services import trigger_webhook
+from apps.fiscal.services.hash_service import HashService
+from apps.fiscal.services.signing_service import SigningService
+from apps.fiscal.services.series_service import SeriesService
+from apps.fiscal.connectors.agt_connector import AGTConnector
+from apps.fiscal.models import FiscalEvent
 
 
 def _draft_number(invoice_type: str) -> str:
@@ -292,40 +297,66 @@ def convert_proforma_to_invoice(*, proforma: Invoice, user, target_type: str, re
 @transaction.atomic
 def issue_invoice(*, invoice: Invoice, user, request=None) -> Invoice:
     invoice = Invoice.objects.select_for_update().select_related("empresa", "estabelecimento").get(pk=invoice.pk)
-    invoice = apply_fiscal_issuance(invoice=invoice)
-    invoice.agt_response_code = "PENDING"
-    invoice.save(
-        update_fields=[
-            "invoice_no",
-            "estabelecimento",
-            "issue_date",
-            "previous_hash",
-            "invoice_hash",
-            "qrcode_string",
-            "status",
-            "agt_response_code",
-            "updated_at",
-        ]
+    
+    # 1. Obter numeração da série via Fiscal Engine
+    series_code, number, previous_hash = SeriesService.get_next_number(
+        empresa=invoice.empresa,
+        estabelecimento=invoice.estabelecimento,
+        document_type=invoice.type
     )
-    queue_agt_sync(invoice=invoice)
-    enqueue_invoice_pdf(invoice=invoice)
+    
+    invoice.invoice_no = SeriesService.format_invoice_no(invoice.type, series_code, number)
+    invoice.issue_date = timezone.localdate()
+    invoice.previous_hash = previous_hash
+    
+    # 2. Calcular Hash Encadeado (Norma AGT)
+    invoice.invoice_hash = HashService.compute_chain_hash(invoice)
+    
+    # 3. Gerar Assinaturas JWS RS256
+    signer = SigningService(invoice.empresa)
+    signatures = signer.sign_invoice(invoice)
+    
+    # 4. Actualizar estado local
+    invoice.status = Invoice.Status.ISSUED
+    invoice.agt_response_code = "PENDING"
+    invoice.save()
+    
+    # Registar evento de assinatura
+    FiscalEvent.objects.create(
+        empresa=invoice.empresa,
+        entity_type="invoice",
+        entity_id=invoice.id,
+        event_type="DOCUMENT_SIGNED",
+        payload=signatures
+    )
 
-    if invoice.type == Invoice.Type.NC and invoice.origin_document:
-        origin = invoice.origin_document
-        origin.paid_amount += invoice.grand_total
-        if origin.paid_amount >= origin.grand_total:
-            origin.status = Invoice.Status.PAID
-        elif origin.paid_amount > 0:
-            origin.status = Invoice.Status.PARTIAL
-        origin.save(update_fields=["status", "paid_amount", "updated_at"])
+    # 5. Enviar para AGT (Assíncrono via Celery em produção, aqui síncrono para teste)
+    connector = AGTConnector(invoice.empresa)
+    try:
+        request_id = connector.register_invoice(invoice, signatures)
+        invoice.agt_request_id = request_id
+        invoice.save(update_fields=["agt_request_id"])
+        
+        FiscalEvent.objects.create(
+            empresa=invoice.empresa,
+            entity_type="invoice",
+            entity_id=invoice.id,
+            event_type="DOCUMENT_SENT",
+            agt_request_id=request_id
+        )
+        
+        # Iniciar polling de estado
+        # task_poll_agt_status.delay(invoice.id) 
+    except Exception as e:
+        invoice.agt_response_code = "ERROR"
+        invoice.save(update_fields=["agt_response_code"])
 
-    invoice.refresh_from_db()
-
+    # Log de auditoria padrão
     create_audit_log(
         empresa=invoice.empresa,
         user=user,
         action="ISSUE_INVOICE",
-        details=f"Factura {invoice.invoice_no} emitida com hash fiscal {invoice.invoice_hash}.",
+        details=f"Factura {invoice.invoice_no} emitida e assinada via Fiscal Engine.",
         request=request,
         entity_type="invoice",
         entity_id=str(invoice.id),
