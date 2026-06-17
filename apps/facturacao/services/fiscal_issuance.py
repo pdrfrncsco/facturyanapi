@@ -2,6 +2,7 @@ import hashlib
 import base64
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import serialization
@@ -72,16 +73,14 @@ def fiscal_hash(*, empresa: Empresa, previous_hash: str, invoice_number: str, in
 
 
 def qr_code_string(*, invoice: Invoice) -> str:
-    # Formato padrão do QR Code fiscal da AGT (exemplo estruturado, pois a norma exige uma concatenação específica)
-    # Exemplo: A:123456789*B:FT SEDE2024/1*C:2024-01-01*D:140.00*E:1140.00*F:HashedValue...
+    # Estrutura legivel para o QR fiscal e estavel para validacao/public portal.
     return (
-        f"A:{invoice.empresa.nif}*"
-        f"B:{invoice.invoice_no}*"
-        f"C:{invoice.issue_date.strftime('%Y-%m-%d')}*"
-        f"D:{invoice.tax_total:.2f}*"
-        f"E:{invoice.grand_total:.2f}*"
-        f"F:{invoice.invoice_hash[:10]}*"
-        f"G:{invoice.invoice_hash[-10:]}"
+        f"nif={invoice.empresa.nif}"
+        f"&doc={invoice.invoice_no}"
+        f"&date={invoice.issue_date.strftime('%Y-%m-%d')}"
+        f"&tax={invoice.tax_total:.2f}"
+        f"&total={invoice.grand_total:.2f}"
+        f"&hash={invoice.invoice_hash}"
     )
 
 
