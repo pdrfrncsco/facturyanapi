@@ -45,6 +45,7 @@ LOCAL_APPS = [
     "apps.saft",
     "apps.notificacoes",
     "apps.integracoes",
+    "apps.compras",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -89,6 +90,9 @@ DATABASES = {
 }
 
 AUTH_USER_MODEL = "accounts.User"
+
+# AI Settings
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
