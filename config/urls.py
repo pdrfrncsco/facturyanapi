@@ -13,6 +13,7 @@ from apps.integracoes.views import MulticaixaWebhookView
 from apps.facturacao.views.recurring import RecurringInvoiceViewSet
 from apps.compras.views import SupplierInvoiceViewSet
 from apps.facturacao.views.currency import ExchangeRateViewSet
+from apps.fiscal.views import ElectronicBillingViewSet
 from apps.pagamentos.views.recibos import ReciboViewSet
 from apps.produtos.views.products import ProductViewSet, StockMovementViewSet
 from apps.relatorios.views.dashboard import DashboardStatsView
@@ -32,6 +33,7 @@ router.register("compras", SupplierInvoiceViewSet, basename="compras")
 router.register("recibos", ReciboViewSet, basename="recibos")
 router.register("taxas-cambio", ExchangeRateViewSet, basename="taxas-cambio")
 router.register("auditoria", AuditLogViewSet, basename="auditoria")
+router.register("fiscal/electronic-billing", ElectronicBillingViewSet, basename="fiscal-electronic-billing")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

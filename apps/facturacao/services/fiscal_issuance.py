@@ -12,6 +12,7 @@ from django.utils import timezone
 from django.conf import settings
 
 from apps.empresas.models import Empresa
+from apps.empresas.services.crypto import decrypt_secret
 from apps.facturacao.models import FiscalSeries, Invoice
 from apps.facturacao.services.decimal_utils import money
 from apps.facturacao.validators.fiscal import validate_can_issue_invoice, validate_fiscal_series_active
@@ -69,7 +70,7 @@ def fiscal_hash(*, empresa: Empresa, previous_hash: str, invoice_number: str, in
     total_str = f"{total:.2f}"
     
     source = f"{invoice_date_str};{system_date_str};{invoice_number};{total_str};{previous_hash}"
-    return sign_string(empresa.software_private_key, source)
+    return sign_string(decrypt_secret(empresa.software_private_key), source)
 
 
 def qr_code_string(*, invoice: Invoice) -> str:

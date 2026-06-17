@@ -4,6 +4,7 @@ import logging
 from typing import Any
 from django.utils import timezone
 from cryptography.hazmat.primitives import serialization
+from apps.empresas.services.crypto import decrypt_secret
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class SignatureService:
             logger.warning(f"Empresa {empresa.nif} sem software_private_key configurada.")
             return "MOCK_SOFTWARE_SIGNATURE"
             
-        return cls.sign_jws(payload=software_info, private_key_pem=empresa.software_private_key)
+        return cls.sign_jws(payload=software_info, private_key_pem=decrypt_secret(empresa.software_private_key))
 
     @classmethod
     def generate_document_signature(cls, *, empresa, document_data: dict) -> str:
@@ -50,7 +51,7 @@ class SignatureService:
             logger.warning(f"Empresa {empresa.nif} sem agt_private_key configurada.")
             return "MOCK_DOCUMENT_SIGNATURE"
             
-        return cls.sign_jws(payload=document_data, private_key_pem=empresa.agt_private_key)
+        return cls.sign_jws(payload=document_data, private_key_pem=decrypt_secret(empresa.agt_private_key))
 
     @staticmethod
     def generate_rsa_pair() -> tuple[str, str]:
