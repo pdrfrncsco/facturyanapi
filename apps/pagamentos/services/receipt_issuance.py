@@ -2,7 +2,8 @@ import hashlib
 from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
-from apps.facturacao.models import FiscalSeries, Invoice
+from apps.facturacao.models import Invoice
+from apps.fiscal.models import DocumentSeries
 from apps.facturacao.services.decimal_utils import money
 from apps.pagamentos.models import Recibo
 
@@ -49,12 +50,28 @@ def qr_code_receipt(*, receipt: Recibo) -> str:
 def allocate_receipt_number(*, receipt: Recibo) -> str:
     issue_date = timezone.localdate()
     fiscal_year = issue_date.year
-    series, _ = FiscalSeries.objects.select_for_update().get_or_create(
+    
+    from apps.empresas.models import Estabelecimento
+    estabelecimento = Estabelecimento.objects.filter(empresa=receipt.empresa, code="SEDE").first() or \
+                      Estabelecimento.objects.filter(empresa=receipt.empresa).first()
+    
+    if not estabelecimento:
+        estabelecimento = Estabelecimento.objects.create(
+            empresa=receipt.empresa,
+            code="SEDE",
+            name="Sede Principal",
+            address=receipt.empresa.address or "Rua Sede",
+            city=receipt.empresa.city or "Luanda",
+            is_active=True
+        )
+
+    series, _ = DocumentSeries.objects.select_for_update().get_or_create(
         empresa=receipt.empresa,
+        estabelecimento=estabelecimento,
         document_type="RE",
         fiscal_year=fiscal_year,
-        code=str(fiscal_year),
-        defaults={"current_number": 0, "is_active": True},
+        series_code=str(fiscal_year),
+        defaults={"current_number": 0, "is_active": True, "status": DocumentSeries.Status.APPROVED},
     )
     
     series.current_number += 1

@@ -18,6 +18,8 @@ class FiscalSeriesStatusSerializer(serializers.Serializer):
     fiscalYear = serializers.IntegerField()
     currentNumber = serializers.IntegerField()
     isActive = serializers.BooleanField()
+    status = serializers.CharField()
+    agtRegistrationId = serializers.CharField(allow_blank=True, required=False)
     estabelecimentoId = serializers.UUIDField(allow_null=True)
     estabelecimentoCode = serializers.CharField(allow_null=True)
 
@@ -56,3 +58,27 @@ class FiscalCertificateUploadSerializer(serializers.Serializer):
         if value.size > 2 * 1024 * 1024:
             raise serializers.ValidationError("O certificado nao pode exceder 2MB.")
         return value
+
+
+class FiscalSeriesRequestSerializer(serializers.Serializer):
+    """Input para solicitar uma nova série fiscal."""
+    estabelecimento_id = serializers.UUIDField(help_text="ID do estabelecimento")
+    document_type = serializers.ChoiceField(
+        choices=["FT", "FR", "NC", "ND", "GR", "PP"],
+        help_text="Tipo de documento fiscal (FT, FR, NC, ND, GR, PP)",
+    )
+    series_code = serializers.CharField(
+        max_length=24,
+        help_text="Código da série (ex: SEDE, LOJA1). Deve corresponder ao código do estabelecimento.",
+    )
+
+
+class FiscalEventSerializer(serializers.Serializer):
+    """Serializer para eventos fiscais de auditoria."""
+    id = serializers.UUIDField()
+    eventType = serializers.CharField(source="event_type")
+    entityType = serializers.CharField(source="entity_type")
+    entityId = serializers.UUIDField(source="entity_id")
+    payload = serializers.DictField()
+    agtRequestId = serializers.CharField(source="agt_request_id", allow_blank=True)
+    createdAt = serializers.DateTimeField(source="created_at")

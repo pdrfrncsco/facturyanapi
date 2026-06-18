@@ -1,6 +1,7 @@
 from django.contrib import admin
 
-from apps.facturacao.models import AgtSyncLog, FiscalSeries, Invoice, InvoiceItem
+from apps.facturacao.models import AgtSyncLog, Invoice, InvoiceItem
+from apps.fiscal.models import DocumentSeries
 
 
 class InvoiceItemInline(admin.TabularInline):
@@ -29,13 +30,13 @@ class InvoiceItemInline(admin.TabularInline):
         return self.readonly_fields
 
 
-@admin.register(FiscalSeries)
-class FiscalSeriesAdmin(admin.ModelAdmin):
-    list_display = ("code", "document_type", "fiscal_year", "current_number", "empresa", "is_active", "is_deleted")
-    list_filter = ("empresa", "document_type", "fiscal_year", "is_active", "is_deleted")
-    search_fields = ("code", "document_type", "empresa__name", "empresa__nif")
+@admin.register(DocumentSeries)
+class DocumentSeriesAdmin(admin.ModelAdmin):
+    list_display = ("series_code", "document_type", "fiscal_year", "current_number", "empresa", "is_active", "status")
+    list_filter = ("empresa", "document_type", "fiscal_year", "is_active", "status")
+    search_fields = ("series_code", "document_type", "empresa__name", "empresa__nif")
     autocomplete_fields = ("empresa",)
-    ordering = ("empresa", "-fiscal_year", "document_type", "code")
+    ordering = ("empresa", "-fiscal_year", "document_type", "series_code")
     readonly_fields = ("id", "created_at", "updated_at")
 
 

@@ -13,7 +13,8 @@ from django.conf import settings
 
 from apps.empresas.models import Empresa
 from apps.empresas.services.crypto import decrypt_secret
-from apps.facturacao.models import FiscalSeries, Invoice
+from apps.facturacao.models import Invoice
+from apps.fiscal.models import DocumentSeries
 from apps.facturacao.services.decimal_utils import money
 from apps.facturacao.validators.fiscal import validate_can_issue_invoice, validate_fiscal_series_active
 
@@ -112,13 +113,13 @@ def allocate_fiscal_series_number(*, invoice: Invoice) -> tuple[str, int]:
     
     branch_code = invoice.estabelecimento.code
     
-    series, created = FiscalSeries.objects.select_for_update().get_or_create(
+    series, created = DocumentSeries.objects.select_for_update().get_or_create(
         empresa=invoice.empresa,
         estabelecimento=invoice.estabelecimento,
         document_type=invoice.type,
         fiscal_year=fiscal_year,
-        code=branch_code,
-        defaults={"current_number": 0, "is_active": True},
+        series_code=branch_code,
+        defaults={"current_number": 0, "is_active": True, "status": DocumentSeries.Status.APPROVED},
     )
     validate_fiscal_series_active(series)
 

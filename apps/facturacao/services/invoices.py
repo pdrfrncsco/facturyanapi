@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from apps.auditoria.services.audit_logs import create_audit_log
 from apps.empresas.models import Empresa, Estabelecimento
-from apps.facturacao.models import Invoice, InvoiceItem, ExchangeRate
+from apps.facturacao.models import Invoice, InvoiceItem, ExchangeRate, FISCAL_IMMUTABLE_FIELDS
 from apps.facturacao.services.agt_sync import enqueue_invoice_pdf, queue_agt_cancellation, queue_agt_sync
 from apps.facturacao.validators.fiscal import validate_can_cancel_invoice
 from apps.facturacao.services.decimal_utils import money, quantity
@@ -296,7 +296,7 @@ def issue_invoice(*, invoice: Invoice, user, request=None) -> Invoice:
 
     apply_fiscal_issuance(invoice=invoice)
     invoice.agt_response_code = "PENDING"
-    invoice.save()
+    invoice.save(update_fields=list(FISCAL_IMMUTABLE_FIELDS) + ["agt_response_code", "status"])
 
     FiscalEvent.objects.create(
         empresa=invoice.empresa,

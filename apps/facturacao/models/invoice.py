@@ -37,29 +37,6 @@ FISCAL_IMMUTABLE_FIELDS = (
 )
 
 
-class FiscalSeries(TenantOwnedModel):
-    estabelecimento = models.ForeignKey(
-        "empresas.Estabelecimento", 
-        on_delete=models.CASCADE, 
-        related_name="series",
-        null=True,
-        blank=True
-    )
-    code = models.CharField(max_length=24)
-    document_type = models.CharField(max_length=8)
-    fiscal_year = models.PositiveIntegerField()
-    current_number = models.PositiveIntegerField(default=0)
-    is_active = models.BooleanField(default=True)
-
-    class Meta:
-        unique_together = [("empresa", "estabelecimento", "code", "document_type", "fiscal_year")]
-        indexes = [models.Index(fields=["empresa", "estabelecimento", "document_type", "is_active"])]
-
-    def __str__(self) -> str:
-        branch = self.estabelecimento.code if self.estabelecimento else "GLOBAL"
-        return f"{self.document_type} {self.fiscal_year}/{self.code} ({branch})"
-
-
 class Invoice(TenantOwnedModel):
     class Type(models.TextChoices):
         FT = "FT", "Factura"

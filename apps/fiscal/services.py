@@ -12,8 +12,8 @@ from cryptography.x509.oid import NameOID
 
 from apps.empresas.models import Empresa
 from apps.empresas.services.crypto import encrypt_secret
-from apps.facturacao.models import AgtSyncLog, FiscalSeries
-from apps.fiscal.models import FiscalCertificate, FiscalEvent
+from apps.facturacao.models import AgtSyncLog
+from apps.fiscal.models import FiscalCertificate, FiscalEvent, DocumentSeries
 
 
 class ElectronicBillingStatus:
@@ -23,6 +23,7 @@ class ElectronicBillingStatus:
     CERTIFICATE_INVALID = "CertificateInvalid"
     SERIES_PENDING = "SeriesPending"
     ACTIVE = "Active"
+    INACTIVE = "Inactive"
     ERROR = "Error"
 
 
@@ -52,7 +53,7 @@ class FiscalConfigurationState:
 
 def _certificate_state(*, empresa: Empresa) -> dict[str, Any]:
     try:
-        certificate = empresa.fiscal_certificate
+        certificate = FiscalCertificate.objects.get(empresa=empresa)
     except FiscalCertificate.DoesNotExist:
         return {
             "exists": False,
@@ -193,18 +194,20 @@ def upload_fiscal_certificate(*, empresa: Empresa, user, certificate_file, passw
 def _series_state(*, empresa: Empresa) -> list[dict[str, Any]]:
     fiscal_year = timezone.localdate().year
     series = (
-        FiscalSeries.objects.filter(empresa=empresa, fiscal_year=fiscal_year)
+        DocumentSeries.objects.filter(empresa=empresa, fiscal_year=fiscal_year)
         .select_related("estabelecimento")
-        .order_by("document_type", "code")
+        .order_by("document_type", "series_code")
     )
     return [
         {
             "id": str(item.id),
             "documentType": item.document_type,
-            "code": item.code,
+            "code": item.series_code,
             "fiscalYear": item.fiscal_year,
             "currentNumber": item.current_number,
             "isActive": item.is_active,
+            "status": item.status,
+            "agtRegistrationId": item.agt_registration_id,
             "estabelecimentoId": str(item.estabelecimento_id) if item.estabelecimento_id else None,
             "estabelecimentoCode": item.estabelecimento.code if item.estabelecimento else None,
         }
@@ -241,12 +244,15 @@ def get_electronic_billing_state(*, empresa: Empresa) -> FiscalConfigurationStat
     last_sync = _last_agt_sync(empresa=empresa)
 
     has_profile = bool(empresa.name and empresa.nif and empresa.address and empresa.city)
-    has_series = any(item["isActive"] for item in series)
+    has_approved_series = any(
+        item["isActive"] and item["status"] == DocumentSeries.Status.APPROVED
+        for item in series
+    )
+    has_any_series = bool(series)
     has_started = FiscalEvent.objects.filter(
         empresa=empresa,
         entity_type="empresa",
-        event_type="CERTIFICATE_UPDATED",
-        payload__action="ELECTRONIC_BILLING_ACTIVATION_STARTED",
+        event_type=FiscalEvent.EventType.ACTIVATION_STARTED,
     ).exists()
 
     if not has_profile:
@@ -257,16 +263,18 @@ def get_electronic_billing_state(*, empresa: Empresa) -> FiscalConfigurationStat
         warnings.append("O certificado fiscal encontra-se expirado.")
     if certificate["exists"] and not certificate["isValid"]:
         warnings.append("O certificado fiscal existe, mas ainda não está válido para emissão.")
-    if not has_series:
-        warnings.append("Não existe série fiscal ativa para o ano corrente.")
+    if not has_approved_series:
+        warnings.append("Não existe série fiscal aprovada e ativa para o ano corrente.")
 
-    if not has_started and not certificate["exists"] and not has_series:
+    if not has_started and not certificate["exists"] and not has_any_series:
         status = ElectronicBillingStatus.NOT_STARTED
     elif not certificate["exists"]:
-        status = ElectronicBillingStatus.CERTIFICATE_MISSING if has_started else ElectronicBillingStatus.ACTIVATION_STARTED
+        # has_started=True means user clicked "Iniciar Processo" → prompt to upload cert
+        # has_started=False with no cert is an edge case (shouldn't normally occur after NOT_STARTED)
+        status = ElectronicBillingStatus.ACTIVATION_STARTED if has_started else ElectronicBillingStatus.CERTIFICATE_MISSING
     elif not certificate["isValid"]:
         status = ElectronicBillingStatus.CERTIFICATE_INVALID
-    elif not has_series:
+    elif not has_approved_series:
         status = ElectronicBillingStatus.SERIES_PENDING
     elif last_sync and last_sync["status"] == AgtSyncLog.Status.ERROR:
         status = ElectronicBillingStatus.ERROR
@@ -298,7 +306,121 @@ def start_electronic_billing_activation(*, empresa: Empresa, user) -> FiscalConf
         empresa=empresa,
         entity_type="empresa",
         entity_id=empresa.id,
-        event_type="CERTIFICATE_UPDATED",
-        payload={"action": "ELECTRONIC_BILLING_ACTIVATION_STARTED", "userId": str(user.id)},
+        event_type=FiscalEvent.EventType.ACTIVATION_STARTED,
+        defaults={"payload": {"action": "ELECTRONIC_BILLING_ACTIVATION_STARTED", "userId": str(user.id)}},
     )
     return get_electronic_billing_state(empresa=empresa)
+
+
+def request_series_for_estabelecimento(
+    *,
+    empresa: Empresa,
+    user,
+    estabelecimento_id: str,
+    document_type: str,
+    series_code: str,
+) -> FiscalConfigurationState:
+    """Solicita (ou re-solicita) o registo de uma série fiscal junto da AGT."""
+    from apps.empresas.models import Estabelecimento
+    from apps.facturacao.integrations.agt.client import AgtClient
+
+    try:
+        estabelecimento = Estabelecimento.objects.get(pk=estabelecimento_id, empresa=empresa)
+    except Estabelecimento.DoesNotExist:
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        raise DjangoValidationError({"estabelecimento_id": "Estabelecimento não encontrado."})
+
+    fiscal_year = timezone.localdate().year
+
+    series, created = DocumentSeries.objects.get_or_create(
+        empresa=empresa,
+        estabelecimento=estabelecimento,
+        document_type=document_type,
+        fiscal_year=fiscal_year,
+        series_code=series_code,
+        defaults={"current_number": 0, "is_active": True, "status": DocumentSeries.Status.DRAFT},
+    )
+
+    # Only request if not already approved
+    if series.status == DocumentSeries.Status.APPROVED:
+        return get_electronic_billing_state(empresa=empresa)
+
+    series.status = DocumentSeries.Status.REQUESTED
+    series.save(update_fields=["status", "updated_at"])
+
+    FiscalEvent.objects.create(
+        empresa=empresa,
+        entity_type="series",
+        entity_id=series.id,
+        event_type=FiscalEvent.EventType.DOCUMENT_CREATED,
+        payload={
+            "action": "SERIES_REQUESTED",
+            "userId": str(user.id),
+            "seriesCode": series_code,
+            "documentType": document_type,
+            "fiscalYear": fiscal_year,
+        },
+    )
+
+    client = AgtClient()
+    result = client.request_series(
+        empresa=empresa,
+        estabelecimento=estabelecimento,
+        document_type=document_type,
+        year=fiscal_year,
+    )
+
+    if result.success:
+        series.status = DocumentSeries.Status.APPROVED
+        series.agt_registration_id = result.request_id
+        series.save(update_fields=["status", "agt_registration_id", "updated_at"])
+
+        FiscalEvent.objects.create(
+            empresa=empresa,
+            entity_type="series",
+            entity_id=series.id,
+            event_type=FiscalEvent.EventType.DOCUMENT_ACCEPTED,
+            payload={
+                "action": "SERIES_APPROVED",
+                "agtRegistrationId": result.request_id,
+                "responseCode": result.response_code,
+            },
+            agt_request_id=result.request_id,
+        )
+    else:
+        series.status = DocumentSeries.Status.REJECTED
+        series.save(update_fields=["status", "updated_at"])
+
+        FiscalEvent.objects.create(
+            empresa=empresa,
+            entity_type="series",
+            entity_id=series.id,
+            event_type=FiscalEvent.EventType.DOCUMENT_REJECTED,
+            payload={
+                "action": "SERIES_REJECTED",
+                "errorMessage": result.error_message,
+                "responseCode": result.response_code,
+            },
+        )
+
+        if not settings.AGT_MOCK_SYNC:
+            from django.core.exceptions import ValidationError as DjangoValidationError
+            raise DjangoValidationError({"series": f"Falha ao registar série na AGT: {result.error_message}"})
+
+    return get_electronic_billing_state(empresa=empresa)
+
+
+def validate_certificate_only(
+    *,
+    empresa: Empresa,
+    certificate_file,
+    password: str,
+) -> dict[str, Any]:
+    """Valida um certificado .pfx/.p12 sem o persistir. Retorna metadata do certificado."""
+    content = certificate_file.read()
+    return validate_certificate_upload(
+        empresa=empresa,
+        file_name=certificate_file.name,
+        content=content,
+        password=password,
+    )

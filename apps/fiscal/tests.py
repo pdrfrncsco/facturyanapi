@@ -15,8 +15,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import User
 from apps.empresas.services.crypto import decrypt_secret
 from apps.empresas.models import Empresa, EmpresaMembership, Estabelecimento
-from apps.facturacao.models import FiscalSeries
-from apps.fiscal.models import FiscalCertificate, FiscalEvent
+from apps.fiscal.models import FiscalCertificate, FiscalEvent, DocumentSeries
 
 
 @override_settings(AGT_MOCK_SYNC=True)
@@ -62,7 +61,7 @@ class ElectronicBillingStatusAPITests(TestCase):
         response = self.api.post("/api/v1/fiscal/electronic-billing/start/", {}, format="json")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["status"], "CertificateMissing")
+        self.assertEqual(response.data["status"], "ActivationStarted")
         self.assertTrue(response.data["canUploadCertificate"])
         self.assertEqual(
             FiscalEvent.objects.filter(
@@ -91,14 +90,15 @@ class ElectronicBillingStatusAPITests(TestCase):
             city="Luanda",
             is_active=True,
         )
-        FiscalSeries.objects.create(
+        DocumentSeries.objects.create(
             empresa=self.empresa,
             estabelecimento=estabelecimento,
-            code="SEDE",
+            series_code="SEDE",
             document_type="FT",
             fiscal_year=timezone.localdate().year,
-            current_number=Decimal("0"),
+            current_number=0,
             is_active=True,
+            status=DocumentSeries.Status.APPROVED,
         )
 
         response = self.api.get("/api/v1/fiscal/electronic-billing/status/")

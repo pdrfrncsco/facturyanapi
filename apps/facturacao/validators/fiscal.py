@@ -2,7 +2,8 @@ from django.core.exceptions import ValidationError
 from django.conf import settings
 from django.utils import timezone
 
-from apps.facturacao.models import FiscalSeries, Invoice
+from apps.facturacao.models import Invoice
+from apps.fiscal.models import DocumentSeries
 
 
 CANCELLABLE_STATUSES = {
@@ -39,9 +40,11 @@ def validate_can_issue_invoice(invoice: Invoice) -> None:
         raise ValidationError({"certificate": "O certificado fiscal encontra-se expirado."})
 
 
-def validate_fiscal_series_active(series: FiscalSeries) -> None:
+def validate_fiscal_series_active(series: DocumentSeries) -> None:
     if not series.is_active:
         raise ValidationError({"series": "A serie fiscal seleccionada nao esta activa."})
+    if series.status != DocumentSeries.Status.APPROVED:
+        raise ValidationError({"series": f"A serie fiscal encontra-se em estado {series.get_status_display()}. Apenas series aprovadas podem emitir."})
 
 
 def validate_can_cancel_invoice(invoice: Invoice, *, reason: str = "") -> None:
